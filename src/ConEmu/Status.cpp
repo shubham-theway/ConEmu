@@ -239,6 +239,10 @@ static StatusColInfo gStatusCols[] =
 	{csi_SizeGrip,		L"StatusBar.Hide.Resize",
 						L"Size grip",
 						L"Click and drag size grip to resize ConEmu window"},
+
+    {csi_ElapsedTime,  L"StatusBar.Hide.Resize",
+                       L"Show Elapsed Time",
+                       L"Shows the time elapsed since the command entered" },
 };
 
 
@@ -395,6 +399,26 @@ bool CStatus::LoadActiveProcess(CRealConsole* pRCon, wchar_t* pszText, int cchMa
 	}
 
 	return lbRc;
+}
+
+bool CStatus::ShowElapsedTime(CRealConsole* pRCon, wchar_t* pszText, int cchMax)
+{
+    bool lbRc = false;
+    CEStr lsInfo;
+    ConProcess cp;
+
+    if (pRCon && pRCon->GetActivePID(&cp))
+    {
+        wchar_t tmpText[20];
+        DWORD elapsedTicks = GetTickCount() - cp.StartedTime;
+        if (!cp.Alive || cp.IsCmd || cp.IsConHost || cp.IsFar || cp.IsMainSrv || cp.IsNtvdm || cp.IsTelnet || cp.IsTermSrv)
+            elapsedTicks = 0;
+        wsprintf(tmpText, L"%lu", elapsedTicks/1000);
+        lstrcpyn(pszText, tmpText, 20);
+        lbRc = true;
+    }
+
+    return lbRc;
 }
 
 void CStatus::PaintStatus(HDC hPaint, LPRECT prcStatus /*= NULL*/)
@@ -594,6 +618,10 @@ void CStatus::PaintStatus(HDC hPaint, LPRECT prcStatus /*= NULL*/)
 						else
 							pszCalcText = m_Items[nDrawCount].sText;
 					}
+                    else if (!gpSet->isStatusColumnHidden[csi_ElapsedTime])
+                    {
+                        ShowElapsedTime(pRCon, m_Items[nDrawCount].sText, countof(m_Items[nDrawCount].sText));
+                    }
 					else
 					{
 						lstrcpyn(m_Items[nDrawCount].sText, L"Ready", countof(m_Items[nDrawCount].sText));
@@ -618,6 +646,10 @@ void CStatus::PaintStatus(HDC hPaint, LPRECT prcStatus /*= NULL*/)
 				else
 					LoadActiveProcess(pRCon, m_Items[nDrawCount].sText, countof(m_Items[nDrawCount].sText));
 				break;
+
+            case csi_ElapsedTime:
+                ShowElapsedTime(pRCon, m_Items[nDrawCount].sText, countof(m_Items[nDrawCount].sText));
+                break;
 
 			case csi_NewVCon:
 				wcscpy_c(m_Items[nDrawCount].sText, L"[+]");

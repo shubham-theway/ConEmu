@@ -161,6 +161,7 @@ struct ConProcess
 	bool  NameChecked, RetryName;
 	bool  Alive, inConsole;
 	int   Bits;
+    ULONGLONG  StartedTime;
 	wchar_t Name[64]; // чтобы полная инфа об ошибке влезала
 };
 

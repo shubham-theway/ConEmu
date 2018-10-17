@@ -92,6 +92,8 @@ enum CEStatusItems
 
 	csi_SizeGrip,
 
+    csi_ElapsedTime,
+
 	//
 	csi_Last
 };
@@ -170,6 +172,7 @@ private:
 	bool OnDataChanged(CEStatusItems *ChangedID, size_t Count, bool abForceOnChange = false);
 
 	bool LoadActiveProcess(CRealConsole* pRCon, wchar_t* pszText, int cchMax);
+    bool ShowElapsedTime(CRealConsole* pRCon, wchar_t* pszText, int cchMax);
 
 	bool mb_Caps, mb_Num, mb_Scroll;
 	bool mb_KeyHooks;

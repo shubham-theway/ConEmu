@@ -9034,6 +9034,7 @@ bool CRealConsole::ProcessUpdate(const DWORD *apPID, UINT anCount)
 								ProcessCheckName(cp, p.szExeFile); //far, telnet, cmd, tcc, conemuc, и пр.
 								cp.Alive = true;
 								cp.inConsole = true;
+                                cp.StartedTime = GetTickCount();
 
 								bool bIsWowProcess = false;
 								if (bIsWin64)
