@@ -30,7 +30,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define _COMMON_HEADER_HPP_
 
 // Interface version
-#define CESERVER_REQ_VER    162
+#define CESERVER_REQ_VER    163
 
 // Max tabs/panes count
 #define MAX_CONSOLE_COUNT 30
@@ -133,6 +133,8 @@ typedef struct _CONSOLE_SELECTION_INFO
 #define ENV_CONEMUDIR_VAR_W              _CRT_WIDE(ENV_CONEMUDIR_VAR_A)
 #define ENV_CONEMUBASEDIR_VAR_A        "ConEmuBaseDir"
 #define ENV_CONEMUBASEDIR_VAR_W          _CRT_WIDE(ENV_CONEMUBASEDIR_VAR_A)
+#define ENV_CONEMUBASEDIRSHORT_VAR_A   "ConEmuBaseDirShort"
+#define ENV_CONEMUBASEDIRSHORT_VAR_W     _CRT_WIDE(ENV_CONEMUBASEDIRSHORT_VAR_A)
 #define ENV_CONEMUWORKDIR_VAR_A        "ConEmuWorkDir"
 #define ENV_CONEMUWORKDIR_VAR_W          _CRT_WIDE(ENV_CONEMUWORKDIR_VAR_A)
 #define ENV_CONEMUDRIVE_VAR_A          "ConEmuDrive"
@@ -159,6 +161,12 @@ typedef struct _CONSOLE_SELECTION_INFO
 #define ENV_CONEMU_BUILD_W               _CRT_WIDE(ENV_CONEMU_BUILD_A)
 #define ENV_CONEMU_CONFIG_A            "ConEmuConfig"
 #define ENV_CONEMU_CONFIG_W              _CRT_WIDE(ENV_CONEMU_CONFIG_A)
+#define ENV_CONEMUCFGDIR_VAR_A         "ConEmuCfgDir"
+#define ENV_CONEMUCFGDIR_VAR_W           _CRT_WIDE(ENV_CONEMUCFGDIR_VAR_A)
+#define ENV_CONEMU_EXEARGS_A           "ConEmuArgs"
+#define ENV_CONEMU_EXEARGS_W              _CRT_WIDE(ENV_CONEMU_EXEARGS_A)
+#define ENV_CONEMU_EXEARGS2_A          "ConEmuArgs2"
+#define ENV_CONEMU_EXEARGS2_W             _CRT_WIDE(ENV_CONEMU_EXEARGS2_A)
 #define ENV_CONEMU_TASKNAME_A          "ConEmuTask"
 #define ENV_CONEMU_TASKNAME_W            _CRT_WIDE(ENV_CONEMU_TASKNAME_A)
 #define ENV_CONEMU_PALETTENAME_A       "ConEmuPalette"
@@ -355,12 +363,18 @@ enum RealBufferScroll
 };
 
 // CECMD_STARTXTERM: what we want to change
+// lifetime:
+//   `process` - mode would be reset on called process termination
+//   `console` - survive on process termination
 enum TermModeCommand
 {
-	tmc_Keyboard = 0,
-	tmc_BracketedPaste = 1,
-	tmc_AppCursorKeys = 2,
-	tmc_CursorShape = 3,
+	tmc_Keyboard       = 0, // TermEmulationType    - process life-time
+	tmc_BracketedPaste = 1, // true/false           - process life-time
+	tmc_AppCursorKeys  = 2, // true/false           - process life-time
+	tmc_CursorShape    = 3, // TermCursorShapes     - ***console*** life-time
+	tmc_MouseMode      = 4, // set of TermMouseMode - process life-time
+	// for array purposes
+	tmc_Last           = 5
 };
 
 // tmc_Keyboard: used for control keys (arrows e.g.) translation
@@ -380,6 +394,22 @@ enum TermCursorShapes
 	tcs_VBarBlink = 5,
 	tcs_VBarSteady = 6,
 	tcs_Last
+};
+
+enum TermMouseMode
+{
+	tmm_None    = 0,
+	tmm_X10     = 0x0001,
+	tmm_VT200   = 0x0002,
+	tmm_BTN     = 0x0004, /* BTN_EVENT_MOUSE */
+	tmm_ANY     = 0x0008, /* ANY_EVENT_MOUSE */
+	tmm_FOCUS   = 0x0010, /* FOCUS_EVENT_MOUSE */
+	tmm_UTF8    = 0x0020, /* Xterm's UTF8 encoding for mouse positions */
+	tmm_XTERM   = 0x0040, /* Xterm's CSI-style mouse encoding */
+	tmm_URXVT   = 0x0080, /* Urxvt's CSI-style mouse encoding */
+	/* **** ConEmu internals *** */
+	tmm_VIM     = 0x1000, /* DEPRECATED: Used to emulate wheel via \033[62~ ... \033[65~ */
+	tmm_SCROLL  = 0x2000, /* Send Up/Down/PgUp/PgDn instead of wheel events */
 };
 
 //#define CONEMUMAPPING    L"ConEmuPluginData%u"
@@ -466,7 +496,6 @@ const CECMD
 	CECMD_ACTIVATETAB    = 58, // dwData[0]=0-based console, dwData[1]=0-based tab number
 	CECMD_FREEZEALTSRV   = 59, // dwData[0]=1-Freeze, 0-Thaw; dwData[1]=New Alt server PID
 	CECMD_SETFULLSCREEN  = 60, // SetConsoleDisplayMode(CONSOLE_FULLSCREEN_MODE) -> CESERVER_REQ_FULLSCREEN
-	CECMD_PROMPTCMD      = 62, // wData - это LPCWSTR (GUI -> ConEmuHk)
 	CECMD_SETTABTITLE    = 63, // wData - это LPCWSTR, посылается в GUI
 	CECMD_SETPROGRESS    = 64, // wData[0]: 0 - remove, 1 - set, 2 - error. Для "1": wData[1] - 0..100%.
 	CECMD_SETCONCOLORS   = 65, // CESERVER_REQ_SETCONSOLORS
@@ -2151,6 +2180,7 @@ struct CESERVER_REQ_START
 	HWND2 hGuiWnd; // In-ghWnd
 	HWND2 hAppWnd; // Hooked application window (для GUI режима)
 	DWORD nValue;  // Error codes
+	BOOL  bLeave;  // Leave tab opened after process exit
 };
 
 // CECMD_LOCKDC

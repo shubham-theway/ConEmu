@@ -69,6 +69,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "../common/HandleKeeper.h"
 #include "../common/PipeServer.h"
 #include "../common/ConEmuInOut.h"
+#include "../common/WErrGuard.h"
 
 #include "../ConEmuCD/ExitCodes.h"
 
@@ -217,6 +218,7 @@ extern HHOOK ghGuiClientRetHook;
 
 CEStartupEnv* gpStartEnv = NULL;
 bool    gbConEmuCProcess = false;
+bool    gbConEmuConnector = false;
 DWORD   gnSelfPID = 0;
 BOOL    gbSelfIsRootConsoleProcess = FALSE;
 BOOL    gbForceStartPipeServer = FALSE;
@@ -439,6 +441,8 @@ CESERVER_CONSOLE_MAPPING_HDR* GetConMap(BOOL abForceRecreate/*=FALSE*/)
 	static bool bLastAnsi = false;
 	bool bAnsi = false;
 	bool bAnsiLog = false;
+
+	CLastErrorGuard errGuard;
 
 	if (gpConInfo && gpAppMap && !abForceRecreate)
 		goto wrap;
@@ -1026,7 +1030,10 @@ DWORD DllStart_Continue()
 		//{
 		#endif
 
-		if (!gbConEmuCProcess)
+		// Don't use injects while running cygwin/msys from our connector
+		// This will eliminate any chanses of BLODA
+		// AND speed up numerous process creation (forking), e.g. during project builds
+		if (!gbConEmuCProcess && !gbConEmuConnector)
 		{
 			DLOG0("StartupHooks",0);
 			print_timings(L"StartupHooks");
@@ -1224,6 +1231,10 @@ void InitExeName()
 	if (IsConsoleServer(gsExeName)) // ConEmuC.exe|| ConEmuC64.exe
 	{
 		gbConEmuCProcess = true;
+	}
+	else if (IsTerminalServer(gsExeName)) // connector
+	{
+		gbConEmuConnector = true;
 	}
 	else if (lstrcmpi(gsExeName, L"powershell.exe") == 0)
 	{
@@ -1694,9 +1705,14 @@ BOOL DllMain_ProcessAttach(HANDLE hModule, DWORD  ul_reason_for_call)
 
 	if (ghConWnd)
 	{
-		HandleKeeper::AllocHandleInfo(GetStdHandle(STD_INPUT_HANDLE), hs_StdIn);
-		HandleKeeper::AllocHandleInfo(GetStdHandle(STD_OUTPUT_HANDLE), hs_StdOut);
-		HandleKeeper::AllocHandleInfo(GetStdHandle(STD_ERROR_HANDLE), hs_StdErr);
+		HandleInformation Info = {};
+		HandleKeeper::AllocHandleInfo(GetStdHandle(STD_INPUT_HANDLE), hs_StdIn, 0, NULL, &Info);
+		_ASSERTE(!gbConEmuConnector || (Info.is_input));
+		HandleKeeper::AllocHandleInfo(GetStdHandle(STD_OUTPUT_HANDLE), hs_StdOut, 0, NULL, &Info);
+		_ASSERTE(!gbConEmuConnector || (Info.is_ansi && Info.is_output));
+		HandleKeeper::AllocHandleInfo(GetStdHandle(STD_ERROR_HANDLE), hs_StdErr, 0, NULL, &Info);
+		_ASSERTE(!gbConEmuConnector || (Info.is_ansi && Info.is_error));
+		ZeroStruct(Info); // for debug breakpoint
 	}
 
 
@@ -1704,7 +1720,7 @@ BOOL DllMain_ProcessAttach(HANDLE hModule, DWORD  ul_reason_for_call)
 
 	bool bCurrentThreadIsMain = false;
 	wchar_t szEvtName[64];
-	if (gbConEmuCProcess)
+	if (gbConEmuCProcess || gbConEmuConnector)
 	{
 		bCurrentThreadIsMain = true;
 	}
@@ -1750,7 +1766,7 @@ BOOL DllMain_ProcessAttach(HANDLE hModule, DWORD  ul_reason_for_call)
 	GetImageSubsystem(gnImageSubsystem, gnImageBits);
 	DLOGEND1();
 
-	if (!gbSelfIsRootConsoleProcess && !gbConEmuCProcess)
+	if (!gbSelfIsRootConsoleProcess && !gbConEmuCProcess && !gbConEmuConnector)
 	{
 		DLOG1_("CEDEFAULTTERMHOOK",ul_reason_for_call);
 
@@ -2686,31 +2702,14 @@ BOOL WINAPI HookServerCommand(LPVOID pInst, CESERVER_REQ* pCmd, CESERVER_REQ* &p
 			}
 		} // CECMD_LANGCHANGE
 		break;
-	case CECMD_PROMPTCMD:
-		{
-			BOOL bProcessed = FALSE;
-			if ((gReadConsoleInfo.InReadConsoleTID || gReadConsoleInfo.LastReadConsoleInputTID)
-				&& (pCmd->DataSize() >= 2*sizeof(wchar_t)))
-			{
-				bProcessed = OnExecutePromptCmd((LPCWSTR)pCmd->wData);
-			}
-
-			lbRc = TRUE;
-			pcbReplySize = sizeof(CESERVER_REQ_HDR)+sizeof(DWORD);
-			if (ExecuteNewCmd(ppReply, pcbMaxReplySize, pCmd->hdr.nCmd, pcbReplySize))
-			{
-				ppReply->dwData[0] = bProcessed;
-			}
-		}
-		break;
 	case CECMD_STARTSERVER:
 		{
 			int nErrCode = -1;
-			wchar_t szSelf[MAX_PATH+16], *pszNamePtr, szCmdLine[MAX_PATH+128];
+			wchar_t szSrvPathName[MAX_PATH+16], *pszNamePtr, szCmdLine[MAX_PATH+140];
 			PROCESS_INFORMATION pi = {};
 			STARTUPINFO si = {sizeof(si)};
 
-			if (GetModuleFileName(ghOurModule, szSelf, MAX_PATH) && ((pszNamePtr = (wchar_t*)PointToName(szSelf)) != NULL))
+			if (GetModuleFileName(ghOurModule, szSrvPathName, MAX_PATH) && ((pszNamePtr = (wchar_t*)PointToName(szSrvPathName)) != NULL))
 			{
 				// Запускаем сервер той же битности, что и текущий процесс
 				_wcscpy_c(pszNamePtr, 16, WIN3264TEST(L"ConEmuC.exe",L"ConEmuC64.exe"));
@@ -2719,18 +2718,20 @@ BOOL WINAPI HookServerCommand(LPVOID pInst, CESERVER_REQ* pCmd, CESERVER_REQ* &p
 				{
 					_ASSERTEX(pCmd->NewServer.hAppWnd!=0);
 					msprintf(szCmdLine, countof(szCmdLine),
-							L"\"%s\" /GID=%u /GHWND=%08X /GUIATTACH=%08X /PID=%u",
-							szSelf,
-							pCmd->NewServer.nGuiPID, (DWORD)pCmd->NewServer.hGuiWnd, (DWORD)pCmd->NewServer.hAppWnd, GetCurrentProcessId());
+							L"\"%s\" /GID=%u /GHWND=%08X /GUIATTACH=%08X /PID=%u %s",
+							szSrvPathName,
+							pCmd->NewServer.nGuiPID, (DWORD)pCmd->NewServer.hGuiWnd, (DWORD)pCmd->NewServer.hAppWnd, GetCurrentProcessId(),
+							pCmd->NewServer.bLeave ? L"/CONFIRM" : L"");
 					gbAttachGuiClient = TRUE;
 				}
 				else
 				{
 					_ASSERTEX(pCmd->NewServer.hAppWnd==0);
 					msprintf(szCmdLine, countof(szCmdLine),
-						L"\"%s\" /GID=%u /GHWND=%08X /ATTACH /PID=%u",
-						szSelf,
-						pCmd->NewServer.nGuiPID, (DWORD)pCmd->NewServer.hGuiWnd, GetCurrentProcessId());
+						L"\"%s\" /GID=%u /GHWND=%08X /ATTACH /PID=%u %s",
+						szSrvPathName,
+						pCmd->NewServer.nGuiPID, (DWORD)pCmd->NewServer.hGuiWnd, GetCurrentProcessId(),
+						pCmd->NewServer.bLeave ? L"/CONFIRM" : L"");
 				}
 
 				if (IsWindowVisible(ghConWnd))

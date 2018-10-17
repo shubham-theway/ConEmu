@@ -3142,7 +3142,7 @@ bool CRealBuffer::ProcessFarHyperlink(UINT messg, COORD crFrom, bool bUpdateScre
 								//_ASSERTE(pszWinPath!=NULL); // must not be here!
 								//pszWinPath = cmd.szFile; -- file not found, do not open absent files!
 								CEStr szDir;
-								wchar_t* pszErrMsg = lstrmerge(L"File '", cmd.szFile, L"' not found!\nDirectory: ", mp_RCon->GetConsoleCurDir(szDir));
+								wchar_t* pszErrMsg = lstrmerge(L"File '", cmd.szFile, L"' not found!\nDirectory: ", mp_RCon->GetConsoleCurDir(szDir, false));
 								if (pszErrMsg)
 								{
 									MsgBox(pszErrMsg, MB_ICONSTOP);
@@ -3170,7 +3170,7 @@ bool CRealBuffer::ProcessFarHyperlink(UINT messg, COORD crFrom, bool bUpdateScre
 									}
 									else
 									{
-										RConStartArgs args;
+										RConStartArgsEx args;
 										bool bRunOutside = (pszCmd[0] == L'#');
 										if (bRunOutside)
 										{
@@ -3191,7 +3191,7 @@ bool CRealBuffer::ProcessFarHyperlink(UINT messg, COORD crFrom, bool bUpdateScre
 												|| (mp_RCon->m_Args.pszUserName != NULL))
 											? crb_On : crb_Off;
 										args.BufHeight = crb_On;
-										//args.eConfirmation = RConStartArgs::eConfNever;
+										//args.eConfirmation = RConStartArgsEx::eConfNever;
 
 										if (bRunOutside)
 										{
@@ -3470,6 +3470,7 @@ bool CRealBuffer::OnMouse(UINT messg, WPARAM wParam, int x, int y, COORD crMouse
 	nModifierNoEmptyPressed = gpConEmu->isSelectionModifierPressed(false);
 
 	if (bSelAllowed && gpSet->isCTSIntelligent
+		&& !mp_RCon->m_Term.nMouseMode
 		&& !isSelectionPresent()
 		&& !nModifierPressed)
 	{
@@ -3556,7 +3557,9 @@ bool CRealBuffer::OnMouse(UINT messg, WPARAM wParam, int x, int y, COORD crMouse
 		// Click outside selection region - would reset active selection
 		if (((messg == WM_LBUTTONDOWN) || ((messg == WM_LBUTTONUP) && !(con.m_sel.dwFlags & CONSOLE_MOUSE_DOWN)))
 			&& gpSet->isCTSIntelligent // Only intelligent mode?
-			&& isSelectionPresent())
+			&& isSelectionPresent()
+			&& !isMouseClickExtension()
+			)
 		{
 			bool bInside = isMouseInsideSelection(x, y);
 			if (!bInside)
@@ -3608,7 +3611,8 @@ bool CRealBuffer::OnMouse(UINT messg, WPARAM wParam, int x, int y, COORD crMouse
 		if (((gpSet->isCTSRBtnAction == 2/*Paste*/) || ((gpSet->isCTSRBtnAction == 3/*Auto*/) && !isSelectionPresent()))
 				&& (messg == WM_RBUTTONDOWN || messg == WM_RBUTTONUP))
 		{
-			if (gpSet->IsModifierPressed(vkCTSVkAct, !mp_RCon->isFar()))
+			bool bAllowAutoPaste = !mp_RCon->isFar() && !mp_RCon->m_Term.nMouseMode;
+			if (gpSet->IsModifierPressed(vkCTSVkAct, bAllowAutoPaste))
 			{
 				if (messg == WM_RBUTTONUP)
 				{
@@ -3888,8 +3892,11 @@ bool CRealBuffer::OnMouseSelection(UINT messg, WPARAM wParam, int x, int y)
 
 	COORD cr = ScreenToBuffer(crScreen);
 
+	// Shift+LClick to mark selection start (StartSelection)
+	// and use Shift+LClick to ExpandSelection
+	bool bExtendSelection = (messg == WM_LBUTTONDOWN || messg == WM_LBUTTONUP) && isMouseClickExtension();
 
-	if ((messg == WM_LBUTTONDOWN)
+	if ((messg == WM_LBUTTONDOWN && !bExtendSelection)
 		|| ((messg == WM_LBUTTONDBLCLK) && (con.m_sel.dwFlags & (CONSOLE_TEXT_SELECTION|CONSOLE_BLOCK_SELECTION)) && (con.m_sel.dwFlags & CONSOLE_DBLCLICK_SELECTION))
 		)
 	{
@@ -3963,7 +3970,7 @@ bool CRealBuffer::OnMouseSelection(UINT messg, WPARAM wParam, int x, int y)
 	}
 	else if (
 		((messg == WM_MOUSEMOVE) && (con.m_sel.dwFlags & CONSOLE_MOUSE_DOWN))
-		|| ((messg == WM_LBUTTONUP) && (con.m_sel.dwFlags & CONSOLE_MOUSE_SELECTION))
+		|| ((messg == WM_LBUTTONUP) && ((con.m_sel.dwFlags & CONSOLE_MOUSE_SELECTION) || bExtendSelection))
 		)
 	{
 		// При LBtnUp может быть несколько вариантов
@@ -3977,6 +3984,9 @@ bool CRealBuffer::OnMouseSelection(UINT messg, WPARAM wParam, int x, int y)
 		//	cr.X = GetMinMax(cr.X, 0, TextWidth());
 		//if (cr.Y<0 || cr.Y>=(int)TextHeight())
 		//	cr.Y = GetMinMax(cr.Y, 0, TextHeight());
+
+		if ((messg == WM_LBUTTONUP) && !(con.m_sel.dwFlags & CONSOLE_MOUSE_SELECTION) && bExtendSelection)
+			con.m_SelClickTick = GetTickCount();
 
 		// Теперь проверки Double/Triple.
 		if ((messg == WM_LBUTTONUP)
@@ -4644,6 +4654,8 @@ void CRealBuffer::ExpandSelection(SHORT anX, SHORT anY, bool bWasSelection)
 	_ASSERTE(anY>=0 && anY<con.m_sbi.dwSize.Y);
 
 	CONSOLE_SELECTION_INFO cur_sel = con.m_sel;
+
+	con.m_sel.dwFlags |= CONSOLE_EXPANDED;
 
 	// 131017 Scroll content if selection cursor goes out of visible screen
 	if (anY < iCurTop)
@@ -6517,6 +6529,26 @@ bool CRealBuffer::isMouseSelectionPresent()
 		return false;
 
 	return ((con.m_sel.dwFlags & CONSOLE_MOUSE_SELECTION) != 0);
+}
+
+// Allows to start selection (by Shift+LClick or Shift+Arrow)
+// and after that extend it by Shift+LClick to clicked postion
+// Inspired by https://superuser.com/q/1218047/139371
+bool CRealBuffer::isMouseClickExtension()
+{
+	if (!this || !con.m_sel.dwFlags)
+		return false;
+
+	// The end of the block already marked
+	if ((con.m_sel.dwFlags & CONSOLE_EXPANDED))
+		return false;
+
+	DWORD nPressed = gpConEmu->isSelectionModifierPressed(false);
+	DWORD nMask = (CONSOLE_TEXT_SELECTION|CONSOLE_BLOCK_SELECTION);
+	if (!(nPressed & nMask) || ((nPressed & nMask) != (con.m_sel.dwFlags & nMask)))
+		return false;
+
+	return true;
 }
 
 bool CRealBuffer::isMouseInsideSelection(int x, int y)

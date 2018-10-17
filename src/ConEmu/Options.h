@@ -119,8 +119,32 @@ struct ColorPalette;
 
 #define DEFAULT_TERMINAL_APPS L"explorer.exe"
 
-#define TABBAR_DEFAULT_CLICK_ACTION 1
-#define TABBTN_DEFAULT_CLICK_ACTION 0
+struct TabBarDblClick
+{
+	enum {
+		NoAction         = 0,
+		Auto             = 1,
+		MaxRestoreWindow = 2,
+		OpenNewShell     = 3,
+		Last
+	};
+};
+#define TABBAR_DEFAULT_CLICK_ACTION  TabBarDblClick::Auto
+
+struct TabBtnDblClick
+{
+	enum {
+		NoAction         = 0,
+		MaxRestoreWindow = 1,
+		CloseTab         = 2,
+		RestartTab       = 3,
+		DuplicateTab     = 4,
+		MaxRestorePane   = 5,
+		RenameTab        = 6,
+		Last
+	};
+};
+#define TABBTN_DEFAULT_CLICK_ACTION  TabBtnDblClick::RenameTab
 
 // ‘%1’ - line number, ‘%2’ - column number, ‘%3’ - C:\\Path\\File, ‘%4’ - C:/Path/File, ‘%5’ - /C/Path/File
 #define HI_GOTO_EDITOR_FAR     L"far.exe /e%1:%2 \"%3\""
@@ -167,9 +191,6 @@ struct Settings
 
 		//reg->Load(L"UseScrollLock", UseScrollLock);
 		bool UseScrollLock;
-
-		//reg->Load(L"CmdOutputCP", nCmdOutputCP);
-		int nCmdOutputCP;
 
 		ConEmuComspec ComSpec;
 
@@ -742,8 +763,8 @@ struct Settings
 		int nTabFlashChanged;
 
 		//reg->Load(L"TabDblClick", nTabDblClickAction);
-		UINT nTabBarDblClickAction; // 0-None, 1-Auto, 2-Maximize/Restore, 3-NewTab (SettingsNS::tabBarDefaultClickActions)
-		UINT nTabBtnDblClickAction; // 0-None, 1-Maximize/Restore, 2-Close, 3-Restart, 4-Duplicate (SettingsNS::tabBtnDefaultClickActions)
+		UINT nTabBarDblClickAction; // enum of TabBarDblClick : TabBarDblClickActions[]
+		UINT nTabBtnDblClickAction; // enum of TabBtnDblClick : TabBtnDblClickActions[]
 
 		//TODO:
 		bool isTabsInCaption;

@@ -891,19 +891,63 @@ static void CreateDefaultTask(LPCWSTR asName, LPCWSTR asGuiArg, LPCWSTR asComman
 	gpSet->CmdTaskSet(iCreatIdx++, lsName, asGuiArg, asCommands, aFlags);
 }
 
+struct FoundFile
+{
+	wchar_t* rsFound;
+	wchar_t* rsOptionalFull;
+	bool bNeedQuot;
+};
+
+class FoundFiles : public MArray<FoundFile>
+{
+public:
+	FoundFiles()
+	{
+	}
+
+	~FoundFiles()
+	{
+		for (INT_PTR i = 0; i < size(); ++i)
+		{
+			FoundFile& f = (*this)[i];
+			SafeFree(f.rsFound);
+			SafeFree(f.rsOptionalFull);
+		}
+		this->eraseall();
+	}
+
+	void Add(const wchar_t* asFound, const wchar_t* asOptionalFull)
+	{
+		if (!asFound || !*asFound)
+		{
+			_ASSERTE(asFound && *asFound);
+			return;
+		}
+		for (INT_PTR i = 0; i < size(); ++i)
+		{
+			FoundFile& f = (*this)[i];
+			if ((lstrcmpi(f.rsFound, asFound) == 0)
+				|| (f.rsOptionalFull && asOptionalFull && (lstrcmpi(f.rsOptionalFull, asOptionalFull) == 0)))
+				return;
+		}
+		FoundFile ff = {lstrdup(asFound), (asOptionalFull && *asOptionalFull) ? lstrdup(asOptionalFull) : NULL};
+		ff.bNeedQuot = IsQuotationNeeded(ff.rsOptionalFull ? ff.rsOptionalFull : ff.rsFound);
+		this->push_back(ff);
+	}
+};
+
 // Search on asFirstDrive and all (other) fixed drive letters
 // asFirstDrive may be letter ("C:") or network (\\server\share)
 // asSearchPath is path to executable (\cygwin\bin\bash.exe)
-static bool FindOnDrives(LPCWSTR asFirstDrive, LPCWSTR asSearchPath, CEStr& rsFound, bool& bNeedQuot, CEStr& rsOptionalFull)
+static size_t FindOnDrives(LPCWSTR asFirstDrive, LPCWSTR asSearchPath, FoundFiles& foundFiles)
 {
+	_ASSERTE(foundFiles.size() == 0);
 	bool bFound = false;
 	wchar_t* pszExpanded = NULL;
 	wchar_t szDrive[4]; // L"C:"
 	CEStr szTemp;
 
-	bNeedQuot = false;
-
-	rsOptionalFull.Empty();
+	CEStr rsFound;
 
 	if (!asSearchPath || !*asSearchPath)
 		goto wrap;
@@ -913,20 +957,89 @@ static bool FindOnDrives(LPCWSTR asFirstDrive, LPCWSTR asSearchPath, CEStr& rsFo
 	{
 		// L"[SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Git_is1:InstallLocation]\\bin\\bash.exe",
 		//   "InstallLocation"="C:\\Utils\\Lans\\GIT\\"
-		CEStr lsBuf, lsVal;
+		CEStr lsBuf, lsVal, lsValName;
 		lsBuf.Set(asSearchPath+1);
 		wchar_t *pszFile = wcschr(lsBuf.ms_Val, L']');
 		if (pszFile)
 		{
+			MArray<wchar_t*> RegFiles;
+
+			HKEY roots[] = {HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
+			DWORD bits[] = {KEY_WOW64_64KEY, KEY_WOW64_32KEY, 0};
+
 			*(pszFile++) = 0;
 			wchar_t* pszValName = wcsrchr(lsBuf.ms_Val, L':');
-			if (pszValName) *(pszValName++) = 0;
-			if (RegGetStringValue(NULL, lsBuf.ms_Val, pszValName, lsVal) > 0)
+			if (pszValName)
 			{
-				rsFound.Attach(JoinPath(lsVal, pszFile));
+				*pszValName = 0;
+				lsValName.Set(pszValName+1);
+
+				pszValName = wcsrchr(lsBuf.ms_Val, L':');
+				if (pszValName && *(pszValName - 1) == L'*' && *(pszValName - 2) == L'\\')
+				{
+					// #DEF_TASK L"[SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*:DisplayName=MSYS2 64bit:InstallLocation]\\usr\\bin\\bash.exe",
+					struct SearchImpl
+					{
+						LPCWSTR pszValName, pszFile;
+						CEStr lsCheckName, lsCheckValue;
+						MArray<wchar_t*>* RegFiles;
+
+						static bool WINAPI Enum(HKEY hk, LPCWSTR pszSubkeyName, LPARAM lParam)
+						{
+							SearchImpl* i = (SearchImpl*)lParam;
+							CEStr lsPath;
+							if (RegGetStringValue(hk, NULL, i->lsCheckName, lsPath) <= 0)
+								return true;
+							if (lsPath.Compare(i->lsCheckValue) != 0)
+								return true;
+							if (RegGetStringValue(hk, NULL, i->pszValName, lsPath) > 0)
+							{
+								i->RegFiles->push_back(JoinPath(lsPath, i->pszFile));
+							}
+							return true;
+						}
+					} impl;
+					impl.RegFiles = &RegFiles;
+					impl.pszValName = lsValName;
+					impl.pszFile = pszFile;
+
+					*(pszValName - 2) = 0;
+					impl.lsCheckName.Set(++pszValName);
+					pszValName = wcschr(impl.lsCheckName.ms_Val, L'=');
+					if (pszValName)
+					{
+						*pszValName = 0;
+						impl.lsCheckValue.Set(++pszValName);
+
+						for (size_t r = 0; r < countof(roots); ++r)
+						{
+							RegEnumKeys(roots[r], lsBuf, SearchImpl::Enum, (LPARAM)&impl);
+						}
+					}
+				}
+				else
+				{
+					// Evaluate HKLM, HKCU, 32bit and 64bit in all variants
+					for (size_t r = 0; r < countof(roots); ++r)
+					{
+						for (size_t b = IsWindows64() ? 0 : 1; b < countof(bits); ++b)
+						{
+							if (RegGetStringValue(roots[r], lsBuf, lsValName, lsVal, bits[b]) > 0)
+							{
+								RegFiles.push_back(JoinPath(lsVal, pszFile));
+							}
+						}
+					}
+				}
+			}
+
+			// When keys population is done
+			for (INT_PTR i = 0; i < RegFiles.size(); ++i)
+			{
+				rsFound.Attach(STD_MOVE(RegFiles[i]));
 				if (FileExists(rsFound))
 				{
-					bNeedQuot = IsQuotationNeeded(rsFound);
+					foundFiles.Add(rsFound, NULL);
 					bFound = true;
 				}
 			}
@@ -940,9 +1053,7 @@ static bool FindOnDrives(LPCWSTR asFirstDrive, LPCWSTR asSearchPath, CEStr& rsFo
 		pszExpanded = ExpandEnvStr(asSearchPath);
 		if (pszExpanded && FileExists(pszExpanded))
 		{
-			bNeedQuot = IsQuotationNeeded(pszExpanded);
-			rsOptionalFull.Set(pszExpanded);
-			rsFound.Set(asSearchPath);
+			foundFiles.Add(asSearchPath, pszExpanded);
 			bFound = true;
 		}
 		goto wrap;
@@ -954,15 +1065,13 @@ static bool FindOnDrives(LPCWSTR asFirstDrive, LPCWSTR asSearchPath, CEStr& rsFo
 		if (apiSearchPath(NULL, asSearchPath, NULL, szTemp))
 		{
 			// OK, create task with just a name of exe file
-			bNeedQuot = IsQuotationNeeded(szTemp);
-			rsOptionalFull.Set(szTemp);
-			rsFound.Set(asSearchPath);
+			foundFiles.Add(asSearchPath, szTemp);
 			bFound = true;
 		}
 		// Search in [HKCU|HKLM]\Software\Microsoft\Windows\CurrentVersion\App Paths
 		else if (SearchAppPaths(asSearchPath, rsFound, false/*abSetPath*/))
 		{
-			bNeedQuot = IsQuotationNeeded(rsFound);
+			foundFiles.Add(rsFound, NULL);
 			bFound = true;
 		}
 		goto wrap;
@@ -972,8 +1081,7 @@ static bool FindOnDrives(LPCWSTR asFirstDrive, LPCWSTR asSearchPath, CEStr& rsFo
 	if (IsFilePath(asSearchPath, true)
 		&& FileExists(asSearchPath))
 	{
-		bNeedQuot = IsQuotationNeeded(asSearchPath);
-		rsFound.Set(asSearchPath);
+		foundFiles.Add(asSearchPath, NULL);
 		bFound = true;
 		goto wrap;
 	}
@@ -985,7 +1093,7 @@ static bool FindOnDrives(LPCWSTR asFirstDrive, LPCWSTR asSearchPath, CEStr& rsFo
 		rsFound.Attach(JoinPath(asFirstDrive, asSearchPath));
 		if (FileExists(rsFound))
 		{
-			bNeedQuot = IsQuotationNeeded(rsFound);
+			foundFiles.Add(rsFound, NULL);
 			bFound = true;
 			goto wrap;
 		}
@@ -1002,7 +1110,7 @@ static bool FindOnDrives(LPCWSTR asFirstDrive, LPCWSTR asSearchPath, CEStr& rsFo
 		rsFound.Attach(JoinPath(szDrive, asSearchPath));
 		if (FileExists(rsFound))
 		{
-			bNeedQuot = IsQuotationNeeded(rsFound);
+			foundFiles.Add(rsFound, NULL);
 			bFound = true;
 			goto wrap;
 		}
@@ -1010,7 +1118,8 @@ static bool FindOnDrives(LPCWSTR asFirstDrive, LPCWSTR asSearchPath, CEStr& rsFo
 
 wrap:
 	SafeFree(pszExpanded);
-	return bFound;
+	_ASSERTE(bFound == (foundFiles.size() != 0));
+	return foundFiles.size();
 }
 
 class CVarDefs
@@ -1172,7 +1281,10 @@ protected:
 		// Use GetImageSubsystem as condition because many exe-s may not have VersionInfo at all
 		if (GetImageSubsystem(pszPath, FI.dwSubsystem, FI.dwBits, FileAttrs))
 		{
-			LoadAppVersion(pszPath, FI.Ver, ErrText);
+			if (FI.dwSubsystem && FI.dwSubsystem <= IMAGE_SUBSYSTEM_WINDOWS_CUI)
+				LoadAppVersion(pszPath, FI.Ver, ErrText);
+			else
+				ZeroStruct(FI.Ver);
 
 			// App instance found, add it to Installed array?
 			bool bAlready = false;
@@ -1246,34 +1358,40 @@ public:
 		bool bCreated = false;
 		va_list argptr;
 		va_start(argptr, asExePath);
-		CEStr szFound, szArgs, szOptFull;
+		CEStr szArgs;
 		wchar_t szUnexpand[MAX_PATH+32];
 
-		while (asExePath)
+		LPCWSTR pszExePathNext = asExePath;
+		while (pszExePathNext)
 		{
-			bool bNeedQuot = false;
-			LPCWSTR pszExePath = asExePath;
-			asExePath = va_arg( argptr, LPCWSTR );
+			LPCWSTR pszExePath = pszExePathNext;
+			pszExePathNext = va_arg( argptr, LPCWSTR );
 
 			// Return expanded env string
-			TODO("Repace with list of 'drives'");
-			if (!FindOnDrives(szConEmuDrive, pszExePath, szFound, bNeedQuot, szOptFull))
+			FoundFiles files;
+			if (!FindOnDrives(szConEmuDrive, pszExePath, files))
 				continue;
-
-			LPCWSTR pszFound = szFound;
-			// Don't use PathUnExpandEnvStrings because it do not do what we need
-			if (UnExpandEnvStrings(szFound, szUnexpand, countof(szUnexpand)) && (lstrcmp(szFound, szUnexpand) != 0))
+			for (INT_PTR i = 0; i < files.size(); ++i)
 			{
-				pszFound = szUnexpand;
-			}
+				FoundFile& f = files[i];
+				LPCWSTR szFound = f.rsFound;
+				LPCWSTR szOptFull = f.rsOptionalFull;
 
-			if (AddAppPath(asName, pszFound, szOptFull.IsEmpty() ? szFound : szOptFull, bNeedQuot, asArgs, asPrefix, asGuiArg) >= 0)
-			{
-				bCreated = true;
-
-				if (Trim())
+				LPCWSTR pszFound = szFound;
+				// Don't use PathUnExpandEnvStrings because it do not do what we need
+				if (UnExpandEnvStrings(szFound, szUnexpand, countof(szUnexpand)) && (lstrcmp(szFound, szUnexpand) != 0))
 				{
-					break;
+					pszFound = szUnexpand;
+				}
+
+				if (AddAppPath(asName, pszFound, (szOptFull && *szOptFull) ? szOptFull : szFound, f.bNeedQuot, asArgs, asPrefix, asGuiArg) >= 0)
+				{
+					bCreated = true;
+
+					if (Trim())
+					{
+						break;
+					}
 				}
 			}
 		}
@@ -1623,8 +1741,15 @@ public:
 		// Find in %Path% and on drives
 		for (i = 0; FarExe[i]; i++)
 		{
-			if (FindOnDrives(szConEmuDrive, FarExe[i], szFound, bNeedQuot, szOptFull))
-				AddAppPath(L"Far", szFound, szOptFull.IsEmpty() ? NULL : szOptFull.ms_Val, true);
+			FoundFiles files;
+			if (FindOnDrives(szConEmuDrive, FarExe[i], files))
+			{
+				for (INT_PTR i = 0; i < files.size(); ++i)
+				{
+					const FoundFile& f = files[i];
+					AddAppPath(L"Far", f.rsFound, f.rsOptionalFull, true);
+				}
+			}
 		}
 
 		// [HKCU|HKLM]\Software\Microsoft\Windows\CurrentVersion\App Paths
@@ -1891,69 +2016,144 @@ static bool WINAPI CreateWinSdkTasks(HKEY hkVer, LPCWSTR pszVer, LPARAM lParam)
 }
 
 // Visual Studio C++
+static void CreateVCTask(AppFoundList& App, LPCWSTR pszPlatform, LPCWSTR pszVer, LPCWSTR pszDir)
+{
+	// "12.0" = "C:\\Program Files (x86)\\Microsoft Visual Studio 12.0\\VC\\"
+	// %comspec% /k ""C:\Program Files (x86)\Microsoft Visual Studio 11.0\VC\vcvarsall.bat"" x86
+
+	// "15.0" = "C:\\Program Files (x86)\\Microsoft Visual Studio\\2017\\Professional\\"
+	// --> ...\2017\Professional\VC\Auxiliary\Build\vcvarsall.bat [x86|x64]
+	// --> ...\2017\Professional\VC\Auxiliary\Build\vcvars32.bat
+	// --> ...\2017\Professional\VC\Auxiliary\Build\vcvars64.bat
+	// --> ...\2017\Professional\VC\Auxiliary\Build\vcvarsamd64_x86.bat
+	// --> ...\2017\Professional\VC\Auxiliary\Build\vcvarsx86_amd64.bat
+
+
+	CEStr pszVcVarsBat;
+	for (int i = 0;; ++i)
+	{
+		switch (i)
+		{
+		case 0:
+			pszVcVarsBat.Attach(JoinPath(pszDir, L"vcvarsall.bat"));
+			break;
+		case 1:
+			pszVcVarsBat.Attach(JoinPath(pszDir, L"VC\\Auxiliary\\Build\\vcvarsall.bat"));
+			break;
+		default:
+			return;
+		}
+
+		if (FileExists(pszVcVarsBat))
+			break;
+	}
+
+	int iVer = wcstol(pszVer, NULL, 10);
+	CEStr pszPrefix(L"cmd /k \"");
+	CEStr pszSuffix(L"-new_console:t:\"VS ", pszVer, L"\"");
+
+	CEStr lsIcon; LPCWSTR pszIconSource = NULL;
+	LPCWSTR pszIconSources[] = {
+		L"%CommonProgramFiles(x86)%\\microsoft shared\\MSEnv\\VSFileHandler.dll",
+		L"%CommonProgramFiles%\\microsoft shared\\MSEnv\\VSFileHandler.dll",
+		NULL};
+	for (int i = 0; pszIconSources[i]; i++)
+	{
+		if (lsIcon.Attach(ExpandEnvStr(pszIconSources[i]))
+			&& FileExists(lsIcon))
+		{
+			pszIconSource = pszIconSources[i];
+			break;
+		}
+	}
+
+	if (iVer && pszIconSource)
+	{
+		LPCWSTR pszIconSfx;
+		switch (iVer)
+		{
+		case 15: pszIconSfx = L",38\""; break;
+		case 14: pszIconSfx = L",33\""; break;
+		case 12: pszIconSfx = L",28\""; break;
+		case 11: pszIconSfx = L",23\""; break;
+		case 10: pszIconSfx = L",16\""; break;
+		case 9:  pszIconSfx = L",10\""; break;
+		default: pszIconSfx = L"\"";
+		}
+		lstrmerge(&pszSuffix.ms_Val, L" -new_console:C:\"", pszIconSource, pszIconSfx);
+	}
+
+	CEStr pszName(L"SDK::VS ", pszVer, L" ", pszPlatform, L" tools prompt");
+	CEStr pszSuffixReady(L"\" ", pszPlatform, L" ", pszSuffix);
+	App.Add(pszName, pszSuffixReady, pszPrefix, NULL/*asGuiArg*/, pszVcVarsBat, NULL);
+}
+
+// Visual Studio C++
 static bool WINAPI CreateVCTasks(HKEY hkVer, LPCWSTR pszVer, LPARAM lParam)
 {
+	AppFoundList *App = (AppFoundList*)lParam;
+
 	//[HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\VisualStudio\11.0\Setup\VC]
 	//"ProductDir"="C:\\Program Files (x86)\\Microsoft Visual Studio 11.0\\VC\\"
 	//[HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\VisualStudio\12.0\Setup\VC]
 	//"ProductDir"="C:\\Program Files (x86)\\Microsoft Visual Studio 12.0\\VC\\"
 	// %comspec% /k ""C:\Program Files (x86)\Microsoft Visual Studio 11.0\VC\vcvarsall.bat"" x86
 
-	CEStr pszDir;
-	if (wcschr(pszVer, L'.'))
+	if (wcschr(pszVer, L'.') && isDigit(*pszVer))
 	{
-		int iVer = wcstol(pszVer, NULL, 10);
-
+		CEStr pszDir;
 		if (RegGetStringValue(hkVer, L"Setup\\VC", L"ProductDir", pszDir) > 0)
 		{
-			CEStr pszVcVarsBat(JoinPath(pszDir, L"vcvarsall.bat"));
-			if (FileExists(pszVcVarsBat))
-			{
-				CEStr pszName(L"SDK::VS ", pszVer, L" x86 tools prompt");
-				CEStr pszFull(L"cmd /k \"\"", pszVcVarsBat, L"\"\" x86 -new_console:t:\"VS ", pszVer, L"\"");
-
-				CEStr lsIcon; LPCWSTR pszIconSource = NULL;
-				LPCWSTR pszIconSources[] = {
-					L"%CommonProgramFiles(x86)%\\microsoft shared\\MSEnv\\VSFileHandler.dll",
-					L"%CommonProgramFiles%\\microsoft shared\\MSEnv\\VSFileHandler.dll",
-					NULL};
-				for (int i = 0; pszIconSources[i]; i++)
-				{
-					if (lsIcon.Attach(ExpandEnvStr(pszIconSources[i]))
-						&& FileExists(lsIcon))
-					{
-						pszIconSource = pszIconSources[i];
-						break;
-					}
-				}
-
-				if (iVer && pszIconSource)
-				{
-					LPCWSTR pszIconSfx;
-					switch (iVer)
-					{
-					case 14: pszIconSfx = L",33\""; break;
-					case 12: pszIconSfx = L",28\""; break;
-					case 11: pszIconSfx = L",23\""; break;
-					case 10: pszIconSfx = L",16\""; break;
-					case 9:  pszIconSfx = L",10\""; break;
-					default: pszIconSfx = L"\"";
-					}
-					lstrmerge(&pszFull.ms_Val, L" -new_console:C:\"", pszIconSource, pszIconSfx);
-				}
-
-				SettingsLoadedFlags old = sAppendMode;
-				if (!(sAppendMode & slf_AppendTasks))
-					sAppendMode = (slf_AppendTasks | slf_RewriteExisting);
-
-				CreateDefaultTask(pszName, L"", pszFull);
-
-				sAppendMode = old;
-			}
+			CreateVCTask(App[0], L"x86", pszVer, pszDir);
+			CreateVCTask(App[1], L"x64", pszVer, pszDir);
 		}
 	}
 
 	return true; // continue reg enum
+}
+
+static bool WINAPI CreateVCTasks(HKEY hkVS, LPCWSTR pszVer, DWORD dwType, LPARAM lParam)
+{
+	AppFoundList *App = (AppFoundList*)lParam;
+
+	//[HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\VisualStudio\SxS\VS7]
+	//"12.0"="C:\\Program Files (x86)\\Microsoft Visual Studio 12.0\\"
+	//"15.0"="C:\\Program Files (x86)\\Microsoft Visual Studio\\2017\\Professional\\"
+	// --> ...\2017\Professional\VC\Auxiliary\Build\vcvarsall.bat [x86|x64]
+	// --> ...\2017\Professional\VC\Auxiliary\Build\vcvars32.bat
+	// --> ...\2017\Professional\VC\Auxiliary\Build\vcvars64.bat
+	// --> ...\2017\Professional\VC\Auxiliary\Build\vcvarsamd64_x86.bat
+	// --> ...\2017\Professional\VC\Auxiliary\Build\vcvarsx86_amd64.bat
+
+	if (wcschr(pszVer, L'.') && isDigit(*pszVer))
+	{
+		CEStr pszDir;
+		if (RegGetStringValue(hkVS, NULL, pszVer, pszDir) > 0)
+		{
+			CreateVCTask(App[0], L"x86", pszVer, pszDir);
+			CreateVCTask(App[1], L"x64", pszVer, pszDir);
+		}
+	}
+
+	return true; // continue reg enum
+}
+
+static void CreateVisualStudioTasks()
+{
+	AppFoundList App[2];
+
+	SettingsLoadedFlags old = sAppendMode;
+	if (!(sAppendMode & slf_AppendTasks))
+		sAppendMode = (slf_AppendTasks | slf_RewriteExisting);
+
+	// Visual Studio prompt: HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\VisualStudio
+	RegEnumKeys(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\VisualStudio", CreateVCTasks, (LPARAM)App);
+	RegEnumValues(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\VisualStudio\\SxS\\VS7", CreateVCTasks, (LPARAM)App);
+
+	App[0].Commit();
+	App[1].Commit();
+
+	sAppendMode = old;
 }
 
 static void CreateChocolateyTask()
@@ -2040,7 +2240,8 @@ static void CreateHelperTasks()
 
 	// Type ANSI color codes
 	// cmd /k type "%ConEmuBaseDir%\Addons\AnsiColors16t.ans" -cur_console:n
-	if (FindOnDrives(NULL, L"%ConEmuBaseDir%\\Addons\\AnsiColors16t.ans", szFound, bNeedQuot, szOptFull))
+	FoundFiles files;
+	if (FindOnDrives(NULL, L"%ConEmuBaseDir%\\Addons\\AnsiColors16t.ans", files))
 	{
 		// Don't use 'App.Add' here, we are creating "cmd.exe" tasks directly
 		CreateDefaultTask(L"Helper::Show ANSI colors", L"", L"cmd.exe /k type \"%ConEmuBaseDir%\\Addons\\AnsiColors16t.ans\" -cur_console:n");
@@ -2051,6 +2252,8 @@ static void CreateHelperTasks()
 static void CreateBashTask()
 {
 	AppFoundList App;
+
+	bool bash_found = false;
 
 	// New Windows 10 feature (build 14316 and higher)
 	//   User have to
@@ -2067,11 +2270,58 @@ static void CreateBashTask()
 		CEStr lsExpanded(ExpandEnvStr(BashOnUbuntu));
 		if (FileExists(lsExpanded))
 		{
-			App.Add(L"Bash::bash",
-				L" -cur_console:pm:/mnt", // "--login -i" is not required yet
-				NULL /*L"chcp utf8 & "*/, // doesn't work either. can't type Russian or international characters.
+			// Prefer to run WSL via connector+wsl_bridge
+			bool use_bridge = false;
+			CEStr lsConnector;
+			const wchar_t* bridgeFiles[] = {L"wsl\\wslbridge.exe", L"wsl\\wslbridge-backend"};
+			const wchar_t* apiFiles[] = {L"wsl\\msys-2.0.dll", L"wsl\\cygwin1.dll"};
+			const wchar_t* connFiles32[] = {L"conemu-msys2-32.exe", L"conemu-cyg-32.exe"};
+			const wchar_t* connFiles64[] = {L"conemu-msys2-64.exe", L"conemu-cyg-64.exe"};
+			CEStr szBaseDir(ExpandEnvStr(L"%ConEmuBaseDir%"));
+			// Check for wslbridge files
+			DWORD bridge_bits = 0, bridge_api = -1;
+			DWORD dwSubsystem = 0, dwBits = 0, FileAttrs = 0;
+			for (size_t i = 0; i < countof(bridgeFiles); ++i)
+			{
+				CEStr lsPath(szBaseDir, L"\\", bridgeFiles[i]);
+				if (!FileExists(lsPath))
+				{
+					break;
+				}
+				// for Windows binaries
+				else if (wcschr(lsPath, L'.') != NULL)
+				{
+					if (GetImageSubsystem(lsPath, dwSubsystem, dwBits, FileAttrs) && (dwBits == 64 || dwBits == 32))
+						bridge_bits = dwBits;
+				}
+			}
+			// wslbridge.exe found?
+			if (bridge_bits == 32 || bridge_bits == 64)
+			{
+				// Check for appropriate API (cygwin1 or msys2)
+				for (size_t i = 0; i < countof(apiFiles); ++i)
+				{
+					CEStr lsPath(szBaseDir, L"\\", apiFiles[i]);
+					if (GetImageSubsystem(lsPath, dwSubsystem, dwBits, FileAttrs) && (dwBits == bridge_bits))
+					{
+						LPCWSTR pszConnectorName = (dwBits == 32) ? connFiles32[i] : connFiles64[i];
+						lsConnector.Attach(JoinPath(szBaseDir, pszConnectorName));
+						if (FileExists(lsConnector))
+						{
+							bridge_api = (DWORD)i;
+							use_bridge = true;
+							lsConnector.Attach(JoinPath(L"%ConEmuBaseDirShort%", pszConnectorName));
+						}
+						break;
+					}
+				}
+			}
+			// Create the task
+			bash_found |= App.Add(L"Bash::bash",
+				use_bridge ? L" --wsl -cur_console:pm:/mnt" : L" -cur_console:pm:/mnt", // "--login -i" is not required yet
+				use_bridge ? L"set \"PATH=%ConEmuBaseDirShort%\\wsl;%PATH%\" & " : NULL,
 				L"-icon \"%USERPROFILE%\\AppData\\Local\\lxss\\bash.ico\"",
-				BashOnUbuntu,
+				use_bridge ? lsConnector.ms_Val : BashOnUbuntu,
 				NULL);
 		}
 	}
@@ -2079,53 +2329,149 @@ static void CreateBashTask()
 	// From Git-for-Windows (aka msysGit v2)
 	bool bGitBashExist = // No sense to add both `git-cmd.exe` and `bin/bash.exe`
 		App.Add(L"Bash::Git bash",
-			L" --no-cd --command=usr/bin/bash.exe -l -i", NULL, NULL,
+			L" --no-cd --command=/usr/bin/bash.exe -l -i", NULL, L"git",
+			L"[SOFTWARE\\GitForWindows:InstallPath]\\git-cmd.exe",
 			L"[SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Git_is1:InstallLocation]\\git-cmd.exe",
 			L"%ProgramFiles%\\Git\\git-cmd.exe", L"%ProgramW6432%\\Git\\git-cmd.exe",
-#ifdef _WIN64
-			L"%ProgramFiles(x86)%\\Git\\git-cmd.exe",
-#endif
+			WIN3264TEST(NULL,L"%ProgramFiles(x86)%\\Git\\git-cmd.exe"),
 			NULL);
-	App.Add(L"Bash::GitSDK bash",
-		L" --no-cd --command=usr/bin/bash.exe -l -i", NULL, NULL,
+	bash_found |= bGitBashExist;
+	bash_found |= App.Add(L"Bash::GitSDK bash",
+		L" --no-cd --command=/usr/bin/bash.exe -l -i", NULL, L"git",
 		L"\\GitSDK\\git-cmd.exe",
 		NULL);
 	// From msysGit
-	if (!bGitBashExist) // Skip if `git-cmd.exe` was already found
-		App.Add(L"Bash::Git bash",
-			L" --login -i -new_console:C:\"" FOUND_APP_PATH_STR L"\\..\\etc\\git.ico\"", NULL, NULL,
+	if (!bGitBashExist) // Skip if `git-cmd.exe` was already found (from MSYS2 or Git-for-Windows)
+		bash_found |= App.Add(L"Bash::Git bash",
+			L" --login -i -new_console:C:\"" FOUND_APP_PATH_STR L"\\..\\etc\\git.ico\"", NULL,  L"msys1",
 			L"[SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Git_is1:InstallLocation]\\bin\\bash.exe",
 			L"%ProgramFiles%\\Git\\bin\\bash.exe", L"%ProgramW6432%\\Git\\bin\\bash.exe",
-#ifdef _WIN64
-			L"%ProgramFiles(x86)%\\Git\\bin\\bash.exe",
-#endif
+			WIN3264TEST(NULL,L"%ProgramFiles(x86)%\\Git\\bin\\bash.exe"),
 			NULL);
 	// For cygwin we can check registry keys
 	// HKLM\SOFTWARE\Wow6432Node\Cygwin\setup\rootdir
 	// HKLM\SOFTWARE\Cygwin\setup\rootdir
 	// HKCU\Software\Cygwin\setup\rootdir
-	App.Add(L"Bash::CygWin bash",
-		L" --login -i -new_console:m:/cygdrive -new_console:C:\"" FOUND_APP_PATH_STR L"\\..\\Cygwin.ico\"", L"set CHERE_INVOKING=1 & ", NULL,
+	bash_found |= App.Add(L"Bash::CygWin bash",
+		L" --login -i -new_console:m:/cygdrive -new_console:C:\"" FOUND_APP_PATH_STR L"\\..\\Cygwin.ico\"", L"set CHERE_INVOKING=1 & ", L"cygwin",
 		L"[SOFTWARE\\Cygwin\\setup:rootdir]\\bin\\bash.exe",
 		L"\\CygWin\\bin\\bash.exe", NULL);
 	//{L"CygWin mintty", L"\\CygWin\\bin\\mintty.exe", L" -"},
-	App.Add(L"Bash::MinGW bash",
-		L" --login -i -new_console:C:\"" FOUND_APP_PATH_STR L"\\..\\msys.ico\"", L"set CHERE_INVOKING=1 & ", NULL,
+	bash_found |= App.Add(L"Bash::MinGW bash",
+		L" --login -i -new_console:C:\"" FOUND_APP_PATH_STR L"\\..\\msys.ico\"", L"set CHERE_INVOKING=1 & ", L"msys1",
 		L"\\MinGW\\msys\\1.0\\bin\\bash.exe", NULL);
 	//{L"MinGW mintty", L"\\MinGW\\msys\\1.0\\bin\\mintty.exe", L" -"},
 	// MSys2 project: 'HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\MSYS2 32bit'
-	App.Add(L"Bash::Msys2-64",
-		L" --login -i -new_console:C:\"" FOUND_APP_PATH_STR L"\\..\\..\\msys2.ico\"", L"set CHERE_INVOKING=1 & ", NULL,
-		L"[SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\MSYS2 64bit:InstallLocation]\\usr\\bin\\bash.exe",
+	// Perhaps for Msys2 we shall use "sh.exe" instead of "bash.exe"?
+	//   the "bash.exe" may be is used for legacy emulation?
+	bash_found |= App.Add(L"Bash::Msys2-64",
+		L" --login -i -new_console:C:\"" FOUND_APP_PATH_STR L"\\..\\..\\msys2.ico\"", L"set CHERE_INVOKING=1 & ", L"msys64",
+		L"[SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*:DisplayName=MSYS2 64bit:InstallLocation]\\usr\\bin\\bash.exe",
 		L"msys64\\usr\\bin\\bash.exe",
 		NULL);
-	App.Add(L"Bash::Msys2-32",
-		L" --login -i -new_console:C:\"" FOUND_APP_PATH_STR L"\\..\\..\\msys2.ico\"", L"set CHERE_INVOKING=1 & ", NULL,
-		L"[SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\MSYS2 32bit:InstallLocation]\\usr\\bin\\bash.exe",
+	bash_found |= App.Add(L"Bash::Msys2-32",
+		L" --login -i -new_console:C:\"" FOUND_APP_PATH_STR L"\\..\\..\\msys2.ico\"", L"set CHERE_INVOKING=1 & ", L"msys32",
+		L"[SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*:DisplayName=MSYS2 32bit:InstallLocation]\\usr\\bin\\bash.exe",
 		L"msys32\\usr\\bin\\bash.exe",
 		NULL);
 	// Last chance for bash
-	App.Add(L"Bash::bash", L" --login -i", L"set CHERE_INVOKING=1 & ", NULL, L"bash.exe", NULL);
+	if (!bash_found)
+		App.Add(L"Bash::bash", L" --login -i", L"set CHERE_INVOKING=1 & ", NULL, L"bash.exe", NULL);
+
+	// Force connector
+	CEStr szBaseDir(ExpandEnvStr(L"%ConEmuBaseDir%"));
+	bool bNeedQuot = IsQuotationNeeded(szBaseDir);
+	for (INT_PTR i = 0; i < App.Installed.size(); ++i)
+	{
+		AppFoundList::AppInfo& ai = App.Installed[i];
+		if (!ai.szGuiArg)
+			continue;
+		DWORD bits = ai.dwBits;
+		CEStr szConnector;
+		LPCWSTR szConnectorName = NULL;
+		bool msys_git_2 = false;
+		if (wcscmp(ai.szGuiArg, L"cygwin") == 0)
+			szConnectorName = bits==32 ? L"conemu-cyg-32.exe"
+				: bits==64 ? L"conemu-cyg-64.exe"
+				: NULL;
+		else if (wcscmp(ai.szGuiArg, L"msys1") == 0)
+			szConnectorName = bits==32 ? L"conemu-msys-32.exe"
+				: NULL;
+		else if (wcscmp(ai.szGuiArg, L"msys32") == 0)
+			szConnectorName = bits==32 ? L"conemu-msys2-32.exe"
+				: NULL;
+		else if (wcscmp(ai.szGuiArg, L"msys64") == 0)
+			szConnectorName = bits==64 ? L"conemu-msys2-64.exe"
+				: NULL;
+		else if ((msys_git_2 = (wcscmp(ai.szGuiArg, L"git") == 0)))
+			szConnectorName = bits==64 ? L"conemu-msys2-64.exe"
+				: bits==32 ? L"conemu-msys2-32.exe"
+				: NULL;
+		else
+			continue;
+
+		SafeFree(ai.szGuiArg);
+
+		if (szConnectorName)
+		{
+			CEStr szConnector(JoinPath(szBaseDir, szConnectorName));
+			if (FileExists(szConnector))
+			{
+				// For git-cmd ai.szPrefix is empty by default
+				_ASSERTE(!ai.szPrefix || (*ai.szPrefix && ai.szPrefix[wcslen(ai.szPrefix)-1]==L' '));
+
+				CEStr szBinPath;
+				szBinPath.Set(ai.szFullPath);
+				wchar_t* ptrFound = wcsrchr(szBinPath.ms_Val, L'\\');
+				if (ptrFound) *ptrFound = 0;
+
+				if (!msys_git_2)
+				{
+					lstrmerge(&ai.szPrefix,
+						// TODO: Optimize: Don't add PATH if required cygwin1.dll/msys2.dll is already on path
+						L"set \"PATH=", szBinPath, L";%PATH%\" & ",
+						// Change main executable
+						/*bNeedQuot ? L"\"" :*/ L"",
+						L"%ConEmuBaseDirShort%\\", szConnectorName,
+						/*bNeedQuot ? L"\" " :*/ L" ",
+						// Force xterm mode
+						L"-new_console:p "
+						);
+				}
+				else
+				{
+					_ASSERTE(ai.szArgs && wcsstr(ai.szArgs, L"--command=/usr/bin/bash.exe"));
+					const wchar_t* cmd_ptr = L"--command=";
+					wchar_t* pszCmd = wcsstr(ai.szArgs, cmd_ptr);
+					if (pszCmd)
+					{
+						pszCmd += wcslen(cmd_ptr);
+						_ASSERTE(ai.szPrefix == NULL || !*ai.szPrefix);
+						lstrmerge(&ai.szPrefix,
+							// TODO: Optimize: Don't add PATH if required cygwin1.dll/msys2.dll is already on path
+							L"set \"PATH=", szBinPath, L"\\usr\\bin;%PATH%\" & ");
+						// Insert connector between "--command=" and "/usr/bin/bash.exe"
+						_ASSERTE(*pszCmd == L'/');
+						*pszCmd = 0;
+						CEStr lsArgs(
+							// git-cmd options
+							ai.szArgs,
+							// Change main executable
+							/*bNeedQuot ? L"\"" :*/ L"",
+							L"%ConEmuBaseDirShort%\\", szConnectorName,
+							/*bNeedQuot ? L"\" " :*/ L" ",
+							// And the tail of the command: "/usr/bin/bash.exe -l -i"
+							L"/", pszCmd+1,
+							// Force xterm mode
+							L" -new_console:p");
+						SafeFree(ai.szArgs);
+						ai.szArgs = lsArgs.Detach();
+					}
+				}
+			}
+		}
+	}
+
 	// Create all bash tasks
 	App.Commit();
 }
@@ -2242,8 +2588,8 @@ void CreateDefaultTasks(SettingsLoadedFlags slfFlags)
 	// Windows SDK: HKLM\SOFTWARE\Microsoft\Microsoft SDKs\Windows
 	RegEnumKeys(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Microsoft SDKs\\Windows", CreateWinSdkTasks, 0);
 
-	// Visual Studio prompt: HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\VisualStudio
-	RegEnumKeys(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\VisualStudio", CreateVCTasks, 0);
+	// Visual Studio prompt
+	CreateVisualStudioTasks();
 
 	// Docker Toolbox
 	CreateDockerTask();

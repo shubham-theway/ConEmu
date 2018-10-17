@@ -30,6 +30,10 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define HIDE_USE_EXCEPTION_INFO
 #define SHOWDEBUGSTR
 
+#ifdef _DEBUG
+//#define SHOW_ATTACH_MSGBOX
+#endif
+
 #include "../common/Common.h"
 #include "../common/CmdLine.h"
 #include "../common/ConEmuCheck.h"
@@ -43,7 +47,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "../ConEmuHk/Injects.h"
 #include "../ConEmu/version.h"
 
-#include "ConEmuC.h"
+#include "ConEmuSrv.h"
 #include "Actions.h"
 #include "GuiMacro.h"
 #include "MapDump.h"

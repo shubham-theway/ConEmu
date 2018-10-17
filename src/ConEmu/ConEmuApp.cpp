@@ -919,10 +919,21 @@ wchar_t* DupCygwinPath(LPCWSTR asWinPath, bool bAutoQuote, LPCWSTR asMntPrefix /
 		}
 	}
 
+	// Some chars must be escaped
+	const wchar_t* posixSpec = bAutoQuote ? L"$" : L" ()$";
+
 	size_t cchLen = _tcslen(asWinPath)
 		+ (bAutoQuote ? 3 : 1) // two or zero quotes + null-termination
 		+ (asMntPrefix ? _tcslen(asMntPrefix) : 0) // '/cygwin' or '/mnt' prefix
 		+ 1/*Possible space-termination on paste*/;
+	if (wcspbrk(asWinPath, posixSpec) != NULL)
+	{
+		for (const wchar_t *pch = asWinPath; *pch; ++pch)
+		{
+			if (wcschr(posixSpec, *pch))
+				++cchLen;
+		}
+	}
 	wchar_t* pszResult = (wchar_t*)malloc(cchLen*sizeof(*pszResult));
 	if (!pszResult)
 		return NULL;
@@ -966,6 +977,8 @@ wchar_t* DupCygwinPath(LPCWSTR asWinPath, bool bAutoQuote, LPCWSTR asMntPrefix /
 		}
 		else
 		{
+			if (wcschr(posixSpec, *asWinPath))
+				*(psz++) = L'\\';
 			*(psz++) = *(asWinPath++);
 		}
 	}
@@ -986,36 +999,48 @@ wchar_t* DupCygwinPath(LPCWSTR asWinPath, bool bAutoQuote, LPCWSTR asMntPrefix /
 // \\server\share/path/file
 // /cygdrive/C/Src/file.c
 // ..\folder/file.c
-wchar_t* MakeWinPath(LPCWSTR asAnyPath)
+LPCWSTR MakeWinPath(LPCWSTR asAnyPath, LPCWSTR pszMntPrefix, CEStr& szWinPath)
 {
 	// Drop spare prefix, point to "/" after "/cygdrive"
-	int iSkip = startswith(asAnyPath, L"/cygdrive/", true);
-	LPCWSTR pszSrc = asAnyPath + ((iSkip > 0) ? (iSkip-1) : 0);
+	int iSkip = startswith(asAnyPath, pszMntPrefix ? pszMntPrefix : L"/cygdrive", true);
+	if (iSkip > 0 && asAnyPath[iSkip] != L'/')
+		iSkip = 0;
+	LPCWSTR pszSrc = asAnyPath + ((iSkip > 0) ? iSkip : 0);
 
 	// Prepare buffer
 	int iLen = lstrlen(pszSrc);
 	if (iLen < 1)
 	{
 		_ASSERTE(lstrlen(pszSrc) > 0);
+		szWinPath.Clear();
 		return NULL;
+	}
+
+	// #CYGDRIVE In some cases we may try to select real location of "~" folder (cygwin and msys)
+	if (pszSrc[0] == L'~' && (pszSrc[1] == 0 || pszSrc[1] == L'/'))
+	{
+		szWinPath.Set(pszSrc);
+		return szWinPath;
 	}
 
 	// Диск в cygwin формате?
 	wchar_t cDrive = 0;
 	if ((pszSrc[0] == L'/' || pszSrc[0] == L'\\')
 		&& isDriveLetter(pszSrc[1])
-		&& (pszSrc[2] == L'/' || pszSrc[2] == L'\\'))
+		&& (pszSrc[2] == L'/' || pszSrc[2] == L'\\' || pszSrc[2] == 0))
 	{
 		cDrive = pszSrc[1];
 		CharUpperBuff(&cDrive, 1);
 		pszSrc += 2;
+		iLen++;
 	}
 
 	// Формируем буфер
-	wchar_t* pszRc = (wchar_t*)malloc((iLen+1)*sizeof(wchar_t));
+	wchar_t* pszRc = szWinPath.GetBuffer(iLen);
 	if (!pszRc)
 	{
 		_ASSERTE(pszRc && "malloc failed");
+		szWinPath.Clear();
 		return NULL;
 	}
 	// Make path
@@ -1024,9 +1049,17 @@ wchar_t* MakeWinPath(LPCWSTR asAnyPath)
 	{
 		*(pszDst++) = cDrive;
 		*(pszDst++) = L':';
+		*(pszDst) = 0;
 		iLen -= 2;
 	}
-	_wcscpy_c(pszDst, iLen+1, pszSrc);
+	else
+	{
+		*(pszDst) = 0;
+	}
+	if (*pszSrc)
+		_wcscpy_c(pszDst, iLen+1, pszSrc);
+	else
+		_wcscpy_c(pszDst, iLen+1, L"\\");
 	// Convert slashes
 	pszDst = wcschr(pszDst, L'/');
 	while (pszDst)
@@ -2156,7 +2189,7 @@ static HRESULT _CreateShellLink(PCWSTR pszArguments, PCWSTR pszPrefix, PCWSTR ps
 			CEStr szBatch;
 			LPCWSTR pszTemp = pszArguments;
 			LPCWSTR pszIcon = NULL;
-			RConStartArgs args;
+			RConStartArgsEx args;
 
 			while (NextArg(&pszTemp, szTmp) == 0)
 			{
@@ -2821,7 +2854,7 @@ int CheckZoneIdentifiers(bool abAutoUnblock)
 		L"This may cause blocking or access denied errors!");
 
 	int iBtn = abAutoUnblock ? IDYES
-		: ConfirmDialog(lsMsg, L"Warning!", NULL, NULL, MB_YESNOCANCEL,
+		: ConfirmDialog(lsMsg, L"Warning!", NULL, NULL, MB_YESNOCANCEL, ghWnd,
 			L"Unblock and Continue", L"Let ConEmu try to unblock these files" L"\r\n" L"You may see SmartScreen and UAC confirmations",
 			L"Visit home page and Exit", CEZONEID /* https://conemu.github.io/en/ZoneId.html */,
 			L"Ignore and Continue", L"You may face further warnings");

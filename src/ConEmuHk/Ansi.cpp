@@ -1725,7 +1725,8 @@ BOOL CEAnsi::ReverseLF(HANDLE hConsoleOutput, BOOL& bApply)
 		bApply = FALSE;
 	}
 
-	if (csbi.dwCursorPosition.Y == csbi.srWindow.Top)
+	if ((csbi.dwCursorPosition.Y == csbi.srWindow.Top)
+		|| (gDisplayOpt.ScrollRegion && csbi.dwCursorPosition.Y == gDisplayOpt.ScrollStart))
 	{
 		LinesInsert(hConsoleOutput, 1);
 	}
@@ -2760,14 +2761,44 @@ CSI P s @			Insert P s (Blank) Character(s) (default = 1) (ICH)
 				else
 					DumpUnknownEscape(Code.pszEscStart, Code.nTotalLen);
 				break;
-			case 12:   /* SRM: set echo mode */
+			case 9:    /* X10_MOUSE */
 			case 1000: /* VT200_MOUSE */
 			case 1002: /* BTN_EVENT_MOUSE */
 			case 1003: /* ANY_EVENT_MOUSE */
 			case 1004: /* FOCUS_EVENT_MOUSE */
 			case 1005: /* Xterm's UTF8 encoding for mouse positions */
 			case 1006: /* Xterm's CSI-style mouse encoding */
-				// xmux/screen?
+			case 1015: /* Urxvt's CSI-style mouse encoding */
+				if ((Code.PvtLen == 1) && (Code.Pvt[0] == L'?'))
+				{
+					static DWORD LastMode = 0;
+					TermMouseMode ModeMask = (Code.ArgV[0] == 9) ? tmm_X10
+						: (Code.ArgV[0] == 1000) ? tmm_VT200
+						: (Code.ArgV[0] == 1002) ? tmm_BTN
+						: (Code.ArgV[0] == 1003) ? tmm_ANY
+						: (Code.ArgV[0] == 1004) ? tmm_FOCUS
+						: (Code.ArgV[0] == 1005) ? tmm_UTF8
+						: (Code.ArgV[0] == 1006) ? tmm_XTERM
+						: (Code.ArgV[0] == 1000) ? tmm_URXVT
+						: tmm_None;
+					DWORD Mode = (Code.Action == L'h')
+						? (LastMode | ModeMask)
+						: (LastMode & ~ModeMask);
+					LastMode = Mode;
+					ChangeTermMode(tmc_MouseMode, Mode);
+				}
+				else
+					DumpUnknownEscape(Code.pszEscStart, Code.nTotalLen);
+				break;
+			case 12:   /* SRM: set echo mode */
+				// tmux/screen?
+				if ((Code.PvtLen == 1) && (Code.Pvt[0] == L'?'))
+					DumpKnownEscape(Code.pszEscStart, Code.nTotalLen, de_Ignored); // ignored for now
+				else
+					DumpUnknownEscape(Code.pszEscStart, Code.nTotalLen);
+				break;
+			case 7786: /* 'V': Mousewheel reporting */
+			case 7787: /* 'W': Application mousewheel mode */
 				if ((Code.PvtLen == 1) && (Code.Pvt[0] == L'?'))
 					DumpKnownEscape(Code.pszEscStart, Code.nTotalLen, de_Ignored); // ignored for now
 				else
@@ -3044,6 +3075,13 @@ CSI P s @			Insert P s (Blank) Character(s) (default = 1) (ICH)
 					break;
 				case 10:
 					// Something strange and unknown... (received from ssh)
+					DumpKnownEscape(Code.pszEscStart, Code.nTotalLen, de_Ignored);
+					break;
+				case 312:
+				case 315:
+				case 414:
+				case 3130:
+					// Something strange and unknown... (received from vim on WSL)
 					DumpKnownEscape(Code.pszEscStart, Code.nTotalLen, de_Ignored);
 					break;
 				default:
@@ -3663,7 +3701,7 @@ void CEAnsi::ChangeTermMode(TermModeCommand mode, DWORD value, DWORD nPID /*= 0*
 		pIn->dwData[0] = mode;
 		pIn->dwData[1] = value;
 		pIn->dwData[2] = nPID ? nPID : GetCurrentProcessId();
-		CESERVER_REQ* pOut = ExecuteGuiCmd(ghConWnd, pIn, ghConWnd);
+		CESERVER_REQ* pOut = ExecuteSrvCmd(gnServerPID, pIn, ghConWnd);
 		ExecuteFreeResult(pIn);
 		ExecuteFreeResult(pOut);
 	}

@@ -127,6 +127,8 @@ public:
 	bool mb_ConEmuHere;
 	/* switch -QuitOnClose: close ConEmu with last tab or cross-clicking */
 	bool mb_ForceQuitOnClose;
+	/* Settings dialog was requested on startup */
+	bool mb_SettingsRequested;
 
 public:
 	/* Store/retrieve command line, specified with "-run" or "-runlist" switches */
@@ -201,6 +203,7 @@ public:
 		CESwitch ResetSettings; // sw_Simple
 		CESwitch AdvLogging; // sw_Int: -log[1|2|3|4]
 		CESwitch Detached; // sw_Simple
+		CESwitch NoAutoClose; // checked by isCloseOnLastTabClose()
 	public:
 		// Suppress intellisense warning:
 		// the default constructor of "CConEmuStart::StartOptions" cannot be referenced -- it is a deleted function	ConEmu

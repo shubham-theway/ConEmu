@@ -50,6 +50,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "../common/Memory.h"
 #include "../common/MAssert.h"
 #include "../common/MStrDup.h"
+#include "../common/CEStr.h"
 
 #if defined(__GNUC__) && !defined(__MINGW64_VERSION_MAJOR)
 #define wmemmove_s(d,ds,s,ss) wmemmove(d,s,ss)
@@ -125,9 +126,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define ACTIVATE_TAB_CRITICAL  1000
 #define POST_UPDATE_TIMEOUT   2000
 
-// Undocumented console message
-#define WM_SETCONSOLEINFO           (WM_USER+201)
-// and others
+// Undocumented messages
 #define SC_RESTORE_SECRET 0x0000f122
 #define SC_MAXIMIZE_SECRET 0x0000f032
 #define SC_PROPERTIES_SECRET 0x0000fff7
@@ -252,7 +251,7 @@ void EscapeChar(bool bSet, LPCWSTR& pszSrc, LPWSTR& pszDst);
 
 wchar_t* getFocusedExplorerWindowPath();
 wchar_t* DupCygwinPath(LPCWSTR asWinPath, bool bAutoQuote, LPCWSTR asMntPrefix = NULL);
-wchar_t* MakeWinPath(LPCWSTR asAnyPath);
+LPCWSTR MakeWinPath(LPCWSTR asAnyPath, LPCWSTR pszMntPrefix, CEStr& szWinPath);
 wchar_t* MakeStraightSlashPath(LPCWSTR asWinPath);
 bool FixDirEndSlash(wchar_t* rsPath);
 enum CESelectFileFlags
@@ -265,7 +264,7 @@ enum CESelectFileFlags
 wchar_t* SelectFolder(LPCWSTR asTitle, LPCWSTR asDefFolder = NULL, HWND hParent = ghWnd, DWORD/*CESelectFileFlags*/ nFlags = sff_AutoQuote /*bool bAutoQuote = true, bool bCygwin = false*/);
 wchar_t* SelectFile(LPCWSTR asTitle, LPCWSTR asDefFile = NULL, LPCWSTR asDefPath = NULL, HWND hParent = ghWnd, LPCWSTR asFilter = NULL, DWORD/*CESelectFileFlags*/ nFlags = sff_AutoQuote /*bool abAutoQuote = true, bool bCygwin = false, bool bSaveNewFile = false*/);
 
-#include "../common/RConStartArgs.h"
+#include "../common/RConStartArgsEx.h"
 
 
 bool isKey(DWORD wp,DWORD vk);
@@ -441,6 +440,14 @@ enum ConEmuWindowMode
 };
 
 LPCWSTR GetWindowModeName(ConEmuWindowMode wm);
+
+// Allow or not to convert pasted Windows path into Posix notation
+typedef BYTE PosixPasteMode;
+const PosixPasteMode
+	pxm_Convert    = 1,  // always try to convert
+	pxm_Intact     = 2,  // never convert
+	pxm_Auto       = 0   // autoselect on certain conditions and m_Args.pszMntRoot value
+;
 
 enum ExpandTextRangeType
 {
@@ -677,6 +684,24 @@ union CESize
 		// Done
 		return Set(IsWidth, NewStyle, NewValue);
 	};
+};
+
+// this is NOT a bitmask field!
+// only exact values are allowed!
+enum EnumVConFlags
+{
+	evf_None     = 0,
+	evf_Active   = 1,
+	evf_Visible  = 2,
+	evf_GroupSet = 3, // Consoles with flag vf_GroupSet
+	evf_All      = 4,
+};
+
+enum GroupInputCmd
+{
+	gic_Switch  = 0,
+	gic_Enable  = 1,
+	gic_Disable = 2,
 };
 
 

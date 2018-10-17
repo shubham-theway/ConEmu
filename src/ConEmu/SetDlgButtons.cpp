@@ -44,6 +44,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "Background.h"
 #include "ConEmu.h"
 #include "ConEmuApp.h"
+#include "ConfirmDlg.h"
 #include "DefaultTerm.h"
 #include "HotkeyDlg.h"
 #include "LngRc.h"
@@ -717,6 +718,10 @@ bool CSetDlgButtons::ProcessButtonClick(HWND hDlg, WORD CB, BYTE uCheck)
 		case rPasteM2Nothing:
 			CSetPgPaste::OnBtn_ClipCtrlV(hDlg, CB, uCheck);
 			break;
+		case cbPasteM1Posix:
+		case cbPasteM2Posix:
+			CSetPgPaste::OnBtn_ClipPosixCvt(hDlg, CB, uCheck);
+			break;
 		case cbClipConfirmEnter:
 			CSetPgPaste::OnBtn_ClipConfirmEnter(hDlg, CB, uCheck);
 			break;
@@ -774,7 +779,7 @@ bool CSetDlgButtons::ProcessButtonClick(HWND hDlg, WORD CB, BYTE uCheck)
 			break;
 		/* *** Update settings *** */
 
-		/* *** Command groups *** */
+		/* *** Tasks *** */
 		case cbCmdGrpDefaultNew:
 		case cbCmdGrpDefaultCmd:
 		case cbCmdGrpTaskbar:
@@ -783,6 +788,9 @@ bool CSetDlgButtons::ProcessButtonClick(HWND hDlg, WORD CB, BYTE uCheck)
 			break;
 		case cbCmdTasksAdd:
 			OnBtn_CmdTasksAdd(hDlg, CB, uCheck);
+			break;
+		case cbCmdTasksDup:
+			OnBtn_CmdTasksDup(hDlg, CB, uCheck);
 			break;
 		case cbCmdTasksDel:
 			OnBtn_CmdTasksDel(hDlg, CB, uCheck);
@@ -826,7 +834,7 @@ bool CSetDlgButtons::ProcessButtonClick(HWND hDlg, WORD CB, BYTE uCheck)
 			break;
 		case stCmdGroupCommands:
 			break; // если нужен тултип для StaticText - нужен стиль SS_NOTIFY, а тогда нужно этот ID просто пропустить, чтобы ассерта не было
-		/* *** Command groups *** */
+		/* *** Tasks *** */
 
 
 		/* *** Default terminal *** */
@@ -993,6 +1001,13 @@ LRESULT CSetDlgButtons::OnButtonClicked(HWND hDlg, WPARAM wParam, LPARAM lParam)
 {
 	_ASSERTE(hDlg!=NULL);
 	WORD CB = LOWORD(wParam);
+
+	if (CDlgItemHelper::isHyperlinkCtrl(CB))
+	{
+		CDlgItemHelper::ProcessHyperlinkCtrl(hDlg, CB);
+		return 0;
+	}
+
 	BYTE uCheck = isChecked(hDlg, CB);
 
 	ProcessButtonClick(hDlg, CB, uCheck);
@@ -1206,6 +1221,46 @@ void CSetDlgButtons::OnBtn_CmdTasksAdd(HWND hDlg, WORD CB, BYTE uCheck)
 } // cbCmdTasksAdd
 
 
+// cbCmdTasksDup
+void CSetDlgButtons::OnBtn_CmdTasksDup(HWND hDlg, WORD CB, BYTE uCheck)
+{
+	_ASSERTE(CB==cbCmdTasksDup);
+
+	// Get the one selected task
+	int *Selected = NULL, iCount = CSetDlgLists::GetListboxSelection(hDlg, lbCmdTasks, Selected);
+	if (iCount != 1 || Selected[0] < 0)
+		return;
+	int iSelected = Selected[0];
+	delete[] Selected;
+	const CommandTasks* pSrc = gpSet->CmdTaskGet(iSelected);
+	if (!pSrc)
+		return;
+
+	iCount = (int)SendDlgItemMessage(hDlg, lbCmdTasks, LB_GETCOUNT, 0,0);
+	if (iCount < 0)
+		return;
+	// ensure the cell is empty and create new task with the same GuiArgs and Commands
+	if (gpSet->CmdTaskGet(iCount))
+		return;
+	gpSet->CmdTaskSet(iCount, L"", pSrc->pszGuiArgs, pSrc->pszCommands);
+	while (iSelected < (iCount - 1))
+	{
+		gpSet->CmdTaskXch(iCount, iCount - 1);
+		--iCount;
+	}
+
+	CSetPgTasks* pTasksPg;
+	if (gpSetCls->GetPageObj(pTasksPg))
+		pTasksPg->OnInitDialog(hDlg, false);
+
+	CSetDlgLists::ListBoxMultiSel(hDlg, lbCmdTasks, iCount);
+
+	if (pTasksPg)
+		pTasksPg->OnComboBox(hDlg, lbCmdTasks, LBN_SELCHANGE);
+
+} // cbCmdTasksDup
+
+
 // cbCmdTasksDel
 void CSetDlgButtons::OnBtn_CmdTasksDel(HWND hDlg, WORD CB, BYTE uCheck)
 {
@@ -1244,7 +1299,7 @@ void CSetDlgButtons::OnBtn_CmdTasksDel(HWND hDlg, WORD CB, BYTE uCheck)
 	if (iCount > 1)
 		_wsprintf(szOthers, SKIPCOUNT(szOthers) L"\n" L"and %i other task(s)", (iCount-1));
 
-	_wsprintf(pszMsg, SKIPLEN(cchMax) L"%sDelete command group\n%s%s?",
+	_wsprintf(pszMsg, SKIPLEN(cchMax) L"%sDelete Task\n%s%s?",
 		bIsStartup ? L"Warning! You about to delete startup task!\n\n" : L"",
 		p->pszName ? p->pszName : L"{???}",
 		szOthers);
@@ -1346,7 +1401,7 @@ void CSetDlgButtons::OnBtn_CmdGroupApp(HWND hDlg, WORD CB, BYTE uCheck)
 	_ASSERTE(CB==cbCmdGroupApp);
 
 	// Добавить команду в группу
-	RConStartArgs args;
+	RConStartArgsEx args;
 	args.aRecreate = cra_EditTab;
 	int nDlgRc = gpConEmu->RecreateDlg(&args);
 
@@ -1506,10 +1561,13 @@ void CSetDlgButtons::OnBtn_AddDefaults(HWND hDlg, WORD CB, BYTE uCheck)
 {
 	_ASSERTE(CB==cbAddDefaults);
 
-	int iBtn = MsgBox(
-		L"Do you want to ADD NEW default tasks in your task list?\n\n"
-		L"Choose <No> to REWRITE EXISTING tasks with defaults too."
-		, MB_YESNOCANCEL|MB_ICONEXCLAMATION, gpConEmu->GetDefaultTitle(), ghOpWnd);
+	int iBtn = ConfirmDialog(L"Do you want to add new default tasks in your task list?",
+		L"Default tasks", gpConEmu->GetDefaultTitle(),
+		CEWIKIBASE L"Tasks.html#add-default-tasks",
+		MB_YESNOCANCEL|MB_ICONEXCLAMATION, ghOpWnd,
+		L"Add new tasks", L"Append absent tasks for newly installed shells",
+		L"Recreate default tasks", L"Add new and REWRITE EXISTING tasks with defaults",
+		L"Cancel");
 	if (iBtn == IDCANCEL)
 		return;
 
@@ -1528,8 +1586,13 @@ void CSetDlgButtons::OnBtn_CmdTasksReload(HWND hDlg, WORD CB, BYTE uCheck)
 {
 	_ASSERTE(CB==cbCmdTasksReload);
 
-	if (MsgBox(L"Warning! All unsaved changes will be lost!\n\nReload command groups from settings?",
-			MB_YESNO|MB_ICONEXCLAMATION, gpConEmu->GetDefaultTitle(), ghOpWnd) != IDYES)
+	int iBtn = ConfirmDialog(L"All unsaved changes will be lost!\n\nReload Tasks from settings?",
+		L"Warning!", gpConEmu->GetDefaultTitle(),
+		CEWIKIBASE L"Tasks.html",
+		MB_YESNO|MB_ICONEXCLAMATION, ghOpWnd,
+		L"Reload Tasks", NULL,
+		L"Cancel", NULL);
+	if (iBtn != IDYES)
 		return;
 
 	// Обновить группы команд
@@ -3223,9 +3286,9 @@ void CSetDlgButtons::OnBtn_CloseConEmuOptions(HWND hDlg, WORD CB, BYTE uCheck)
 	// Apply new value
 	gpSet->isMultiLeaveOnClose = bClose ? 0 : bQuit ? 2 : 1;
 
-	if (bClose && gpConEmu->opt.Detached)
+	if (bClose && gpConEmu->opt.NoAutoClose)
 	{
-		gpConEmu->opt.Detached.Clear();
+		gpConEmu->opt.NoAutoClose.Clear();
 	}
 
 	if (CurVal != gpSet->isMultiLeaveOnClose)

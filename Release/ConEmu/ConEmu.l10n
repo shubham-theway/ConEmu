@@ -880,13 +880,6 @@
             , "between text and background is indistinguishable" ],
       "id": 3056 }
     ,
-    "lbCmdOutputCP": {
-      "en": [ "Windows command processor (cmd.exe) may cause then output of internal commands to be OEM or Unicode.\r\n"
-            , "You may force this selection, or use automatic selection (FAR2 -> Unicode)." ],
-      "zh": [ "Windows 命令行 （cmd.exe） 可能导致内部命令的输出为OEM或者Unicode.\r\n"
-            , "你可以强制选择，或者使用自动选择 （FAR2 -> Unicode）。" ],
-      "id": 1558 }
-    ,
     "lbColorsOverride": {
       "en": [ "You may choose one of predefined color schemes.\r\n"
             , "Each scheme customize 32 colors (16+16)\r\n"
@@ -1698,53 +1691,53 @@
       "id": 2839 }
     ,
     "vkConsole_1": {
-      "en": "Activate console by number (Use ‘Host-key’+Number to switch consoles)",
-      "zh": "以数字激活控制台 （使用‘Host-key’+数字来切换控制台）",
+      "en": "Activate console by number (may be disabled)",
+      "zh": "以数字激活控制台 （可被禁用）",
       "id": 2031 }
     ,
     "vkConsole_10": {
-      "en": "Activate console by number (Use ‘Host-key’+Number to switch consoles)",
-      "zh": "以数字激活控制台 （使用‘Host-key’+数字来切换控制台）",
+      "en": "Activate console by number (may be disabled)",
+      "zh": "以数字激活控制台 （可被禁用）",
       "id": 2040 }
     ,
     "vkConsole_2": {
-      "en": "Activate console by number (Use ‘Host-key’+Number to switch consoles)",
-      "zh": "以数字激活控制台 （使用‘Host-key’+数字来切换控制台）",
+      "en": "Activate console by number (may be disabled)",
+      "zh": "以数字激活控制台 （可被禁用）",
       "id": 2032 }
     ,
     "vkConsole_3": {
-      "en": "Activate console by number (Use ‘Host-key’+Number to switch consoles)",
-      "zh": "以数字激活控制台 （使用‘Host-key’+数字来切换控制台）",
+      "en": "Activate console by number (may be disabled)",
+      "zh": "以数字激活控制台 （可被禁用）",
       "id": 2033 }
     ,
     "vkConsole_4": {
-      "en": "Activate console by number (Use ‘Host-key’+Number to switch consoles)",
-      "zh": "以数字激活控制台 （使用‘Host-key’+数字来切换控制台）",
+      "en": "Activate console by number (may be disabled)",
+      "zh": "以数字激活控制台 （可被禁用）",
       "id": 2034 }
     ,
     "vkConsole_5": {
-      "en": "Activate console by number (Use ‘Host-key’+Number to switch consoles)",
-      "zh": "以数字激活控制台 （使用‘Host-key’+数字来切换控制台）",
+      "en": "Activate console by number (may be disabled)",
+      "zh": "以数字激活控制台 （可被禁用）",
       "id": 2035 }
     ,
     "vkConsole_6": {
-      "en": "Activate console by number (Use ‘Host-key’+Number to switch consoles)",
-      "zh": "以数字激活控制台 （使用‘Host-key’+数字来切换控制台）",
+      "en": "Activate console by number (may be disabled)",
+      "zh": "以数字激活控制台 （可被禁用）",
       "id": 2036 }
     ,
     "vkConsole_7": {
-      "en": "Activate console by number (Use ‘Host-key’+Number to switch consoles)",
-      "zh": "以数字激活控制台 （使用‘Host-key’+数字来切换控制台）",
+      "en": "Activate console by number (may be disabled)",
+      "zh": "以数字激活控制台 （可被禁用）",
       "id": 2037 }
     ,
     "vkConsole_8": {
-      "en": "Activate console by number (Use ‘Host-key’+Number to switch consoles)",
-      "zh": "以数字激活控制台 （使用‘Host-key’+数字来切换控制台）",
+      "en": "Activate console by number (may be disabled)",
+      "zh": "以数字激活控制台 （可被禁用）",
       "id": 2038 }
     ,
     "vkConsole_9": {
-      "en": "Activate console by number (Use ‘Host-key’+Number to switch consoles)",
-      "zh": "以数字激活控制台 （使用‘Host-key’+数字来切换控制台）",
+      "en": "Activate console by number (may be disabled)",
+      "zh": "以数字激活控制台 （可被禁用）",
       "id": 2039 }
     ,
     "vkConUnfasten": {
@@ -2057,6 +2050,14 @@
       "zh": "可见的分屏组键盘输入",
       "id": 2728 }
     ,
+    "vkMultiGroupAll": {
+      "en": "Group keyboard input for all consoles",
+      "id": 3079 }
+    ,
+    "vkMultiGroupKey": {
+      "en": "Add active console into group keyboard input",
+      "id": 3085 }
+    ,
     "vkMultiNew": {
       "en": "Create new console or new window (check ‘Multiple consoles in one ConEmu window’)",
       "zh": "创建新的控制台或新的窗口 （选中 ‘多个consoles在一个ConEmu窗口里’）",
@@ -2262,6 +2263,26 @@
       "en": "Split: Move splitter upward",
       "zh": "分屏：向上移动分离器",
       "id": 2606 }
+    ,
+    "vkSplitSwap": {
+      "en": "Split: Exchange with nearest pane",
+      "id": 3084 }
+    ,
+    "vkSplitSwapDown": {
+      "en": "Split: Exchange with nearest pane downward",
+      "id": 3081 }
+    ,
+    "vkSplitSwapLeft": {
+      "en": "Split: Exchange with nearest pane leftward",
+      "id": 3082 }
+    ,
+    "vkSplitSwapRight": {
+      "en": "Split: Exchange with nearest pane rightward",
+      "id": 3083 }
+    ,
+    "vkSplitSwapUp": {
+      "en": "Split: Exchange with nearest pane upward",
+      "id": 3080 }
     ,
     "vkSystemMenu": {
       "en": "Show ConEmu System menu",
@@ -2588,6 +2609,10 @@
       "zh": "Attach: 选择窗口或控制台应用程序",
       "id": 5 }
     ,
+    "lng_DlgCreateNewConsole": {
+      "en": "Create new console",
+      "id": 85 }
+    ,
     "lng_DlgFastCfg": {
       "en": "fast configuration",
       "ru": "быстрая настройка",
@@ -2605,6 +2630,10 @@
       "ru": "Переименовать таб",
       "zh": "重命名标签页（tab）",
       "id": 3 }
+    ,
+    "lng_DlgRestartConsole": {
+      "en": "Restart console",
+      "id": 84 }
     ,
     "lng_DlgSettings": {
       "en": "Settings",
@@ -3315,6 +3344,10 @@
       "zh": "向下（&D）",
       "id": 2127 }
     ,
+    "cbCmdTasksDup": {
+      "en": "Clone",
+      "id": 3087 }
+    ,
     "cbCmdTasksParm": {
       "en": "File path...",
       "zh": "文件路径...",
@@ -3934,6 +3967,14 @@
       "zh": "仅每组活动的窗格",
       "id": 2599 }
     ,
+    "cbPasteM1Posix": {
+      "en": "Allow Windows to POSIX path conversion",
+      "id": 3088 }
+    ,
+    "cbPasteM2Posix": {
+      "en": "Allow Windows to POSIX path conversion",
+      "id": 3089 }
+    ,
     "cbProcessAnsi": {
       "en": "ANSI and xterm sequences",
       "_zh": "ANSI X3.64 / xterm 256 色",
@@ -3994,14 +4035,18 @@
       "zh": "以管理员身份运行（&R）",
       "id": 1547 }
     ,
+    "cbRunAsNetOnly": {
+      "en": "Use credentials for network resources onl&y",
+      "id": 1651 }
+    ,
     "cbRunAsRestricted": {
       "en": "Restricte&d current user",
       "zh": "受限的（&d）当前用户",
       "id": 1650 }
     ,
     "cbRunInNewWindow": {
-      "en": "New &window",
-      "zh": "新建（&w）窗口",
+      "en": "Create new &window",
+      "_zh": "新建（&w）窗口",
       "id": 2330 }
     ,
     "cbSafeFarClose": {
@@ -4125,8 +4170,8 @@
       "id": 2421 }
     ,
     "cbSuppressBells": {
-      "en": "Suppress bells",
-      "zh": "抑制bell声",
+      "en": "Suppress bells (beeps)",
+      "_zh": "抑制bell声",
       "id": 2598 }
     ,
     "cbTabLazy": {
@@ -4140,8 +4185,8 @@
       "id": 1533 }
     ,
     "cbTabSelf": {
-      "en": "Internal CtrlTab",
-      "zh": "内部CtrlTab",
+      "en": "Internal Ctrl+Tab",
+      "zh": "内部Ctrl+Tab",
       "id": 1531 }
     ,
     "cbTabsInCaption": {
@@ -4781,25 +4826,19 @@
       "zh": "可选（&A）模式",
       "id": 2405 }
     ,
+    "IDC_ATTACH_LEAVE_OPEN": {
+      "en": "&Leave opened",
+      "id": 3078 }
+    ,
     "IDC_CONSOLE_STATES": {
       "en": "Console states",
       "zh": "Console 状态",
       "id": 1560 }
     ,
-    "IDC_NEWCONSOLE": {
-      "en": "&New",
-      "zh": "新建（&N）",
-      "id": 1775 }
-    ,
     "IDC_REFRESH": {
       "en": "&Refresh",
       "zh": "刷新（&R）",
       "id": 1776 }
-    ,
-    "IDC_RESTART_MSG": {
-      "en": "About to restart console",
-      "zh": "将要重启控制台",
-      "id": 1529 }
     ,
     "IDC_START": {
       "en": "Re&start",
@@ -5412,11 +5451,6 @@
       "zh": "热键（&H）:",
       "id": 3024 }
     ,
-    "stCmdOutputCP": {
-      "en": "Cmd.exe output codepage:",
-      "zh": "Cmd.exe输出代码页",
-      "id": 2954 }
-    ,
     "stCmdTaskAdd": {
       "en": "Add:",
       "zh": "添加：",
@@ -5835,6 +5869,10 @@
       "en": "States:",
       "zh": "状态：",
       "id": 2941 }
+    ,
+    "stRestartCmd": {
+      "en": "Startup command or {Task} name; -new_console switches:",
+      "id": 3086 }
     ,
     "stRunAsPassword": {
       "en": "&Password:",

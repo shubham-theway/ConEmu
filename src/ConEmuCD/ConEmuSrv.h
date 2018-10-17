@@ -134,6 +134,7 @@ extern HWND    ghConEmuWnd; // Root! window
 extern HWND    ghConEmuWndDC; // ConEmu DC window
 extern HWND    ghConEmuWndBack; // ConEmu Back window
 extern void    SetConEmuWindows(HWND hRootWnd, HWND hDcWnd, HWND hBackWnd);
+extern void    SetConEmuFolders(LPCWSTR asExeDir, LPCWSTR asBaseDir);
 extern DWORD   gnMainServerPID; // PID сервера (инициализируется на старте, при загрузке Dll)
 extern DWORD   gnAltServerPID; // PID сервера (инициализируется на старте, при загрузке Dll)
 extern BOOL    gbLogProcess; // (pInfo->nLoggingType == glt_Processes)
@@ -181,7 +182,7 @@ extern HANDLE ghFarInExecuteEvent;
 #include "../common/ConEmuCheck.h"
 #include "../common/MConHandle.h"
 #include "../common/MFileMapping.h"
-#include "../common/MFileLog.h"
+#include "../common/MFileLogEx.h"
 #include "../common/MSection.h"
 #include "../common/WObjects.h"
 #include "../common/ConsoleAnnotation.h"
@@ -424,7 +425,6 @@ extern RunMode gnRunMode;
 
 extern BOOL gbDumpServerInitStatus;
 extern BOOL gbNoCreateProcess;
-extern int  gnCmdUnicodeMode;
 extern BOOL gbUseDosBox;
 extern BOOL gbRootIsCmdExe;
 extern BOOL gbAttachFromFar;
@@ -443,7 +443,7 @@ extern BOOL  gbVisibleOnStartup;
 #ifndef __GNUC__
 #pragma message("ComEmuC compiled in X86 mode")
 #endif
-#define NTVDMACTIVE (gpSrv->bNtvdmActive)
+#define NTVDMACTIVE (gpSrv->processes->bNtvdmActive)
 #endif
 
 #include "../common/PipeServer.h"
@@ -457,6 +457,8 @@ struct AltServerInfo
 	DWORD  nPrevPID;
 };
 
+struct ConProcess;
+
 #include "Debugger.h"
 
 typedef BOOL (WINAPI* FGetConsoleDisplayMode)(LPDWORD);
@@ -464,9 +466,15 @@ extern FGetConsoleDisplayMode pfnGetConsoleDisplayMode;
 
 struct SrvInfo
 {
+	void InitFields();
+	void FinalizeFields();
+
 	HANDLE hRootProcess, hRootThread;
 	DWORD dwRootProcess, dwRootThread; DWORD dwRootStartTime;
 	DWORD dwParentFarPID;
+
+	// Full information about our console processes
+	ConProcess* processes;
 
 	CESERVER_REQ_PORTABLESTARTED Portable;
 
@@ -520,20 +528,7 @@ struct SrvInfo
 	BOOL bReopenHandleAllowed;
 	UINT nMaxFPS;
 	//
-	MSection *csProc;
 	MSection *csAltSrv;
-	// Список процессов нам нужен, чтобы определить, когда консоль уже не нужна.
-	// Например, запустили FAR, он запустил Update, FAR перезапущен...
-	UINT nProcessCount, nMaxProcesses;
-	UINT nConhostPID; // Windows 7 and higher: "conhost.exe"
-	DWORD *pnProcesses, *pnProcessesGet, *pnProcessesCopy, nProcessStartTick;
-	DWORD nLastRetProcesses[CONSOLE_PROCESSES_MAX/*20*/];
-	DWORD nLastFoundPID; // Informational! Retrieved by CheckProcessCount/pfnGetConsoleProcessList
-	DWORD dwProcessLastCheckTick;
-#ifndef WIN64
-	BOOL bNtvdmActive; DWORD nNtvdmPID;
-#endif
-	//BOOL bTelnetActive;
 	//
 	wchar_t szPipename[MAX_PATH], szInputname[MAX_PATH], szGuiPipeName[MAX_PATH], szQueryname[MAX_PATH];
 	wchar_t szGetDataPipe[MAX_PATH], szDataReadyEvent[64];
@@ -590,10 +585,6 @@ struct SrvInfo
 	HANDLE hCursorChangeEvent; // ServerMode, перечитать консоль (облегченный режим), т.к. был изменен курсор, - отослать в GUI
 	BOOL   bFarCommitRegistered; // Загружен (в этом! процессе) ExtendedConsole.dll
 	BOOL   bCursorChangeRegistered; // Загружен (в этом! процессе) ExtendedConsole.dll
-	#ifdef USE_COMMIT_EVENT
-	HANDLE hExtConsoleCommit; // Event для синхронизации (выставляется по Commit);
-	DWORD  nExtConsolePID;
-	#endif
 	BOOL bForceConsoleRead; // Пнуть нить опроса консоли RefreshThread чтобы она без задержек перечитала содержимое
 	// Смена размера консоли через RefreshThread
 	LONG nRequestChangeSize;
@@ -638,21 +629,6 @@ struct SrvInfo
 	wchar_t *pszPreAliases;
 	DWORD nPreAliasSize;
 
-	void InitFields()
-	{
-		csColorerMappingCreate.Init();
-		csReadConsoleInfo.Init();
-		csRefreshControl.Init();
-		AltServers.Init();
-		TopLeft.Reset();
-	};
-	void FinalizeFields()
-	{
-		csColorerMappingCreate.Close();
-		csReadConsoleInfo.Close();
-		csRefreshControl.Close();
-		AltServers.Release();
-	};
 };
 
 extern SrvInfo *gpSrv;
@@ -701,8 +677,8 @@ extern SHORT gnBufferHeight, gnBufferWidth;
 
 //extern HANDLE ghLogSize;
 //extern wchar_t* wpszLogSizeFile;
-class MFileLog;
-extern MFileLog* gpLogSize;
+class MFileLogEx;
+extern MFileLogEx* gpLogSize;
 
 
 extern BOOL gbInRecreateRoot;

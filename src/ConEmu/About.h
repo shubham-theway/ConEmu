@@ -52,6 +52,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 	L"-MinTSA - start minimized in taskbar status area, hide to TSA after console close.\r\n" \
 	L"-StartTSA - start minimized in taskbar status area, exit after console close.\r\n" \
 	L"-Detached - start ConEmu without consoles.\r\n" \
+	L"-NoAutoClose - don't close ConEmu window automatically with last tab.\r\n" \
 	L"-Icon <file> - Take icon from file (exe, dll, ico).\r\n" \
 	L"-Title <title> - Set fixed(!) title for ConEmu window. You may use environment variables in <title>.\r\n" \
 	L"-Multi | -NoMulti - Enable or disable multiconsole features.\r\n" \
@@ -85,6 +86,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 	L"-LoadCfgFile <file> - Use specified xml file as configuration storage.\r\n" \
 	L"-SaveCfgFile <file> - Save configuration to the specified xml file.\r\n" \
 	L"-LoadRegistry - Use Windows registry as configuration storage.\r\n" \
+	L"-Settings - Open settings dialog after ConEmu startup.\r\n" \
 	L"-SetDefTerm - Set ConEmu as default terminal, use with \"-Exit\" switch.\r\n" \
 	L"-UpdateSrcSet <url> - Force to check version.ini by another url.\r\n" \
 	L"-AnsiLog <folder> - Force console output logging into the folder.\r\n" \
@@ -289,6 +291,12 @@ _DBGHLP(L"-ZoneId - Try to drop :Zone.Identifier without confirmation.\r\n") \
 	L"     Cmd==0: switch mode (default)\r\n" \
 	L"     Cmd==1: group\r\n" \
 	L"     Cmd==2: un-group\r\n" \
+	L"  - Group keyboard input for all consoles\r\n" \
+	L"     Cmd==3: switch mode\r\n" \
+	L"     Cmd==4: group\r\n" \
+	L"     Cmd==5: un-group\r\n" \
+	L"  - Group keyboard input for selected consoles\r\n" \
+	L"     Cmd==6: toggle group mode on active console\r\n" \
 	L"HighlightMouse(<What>[,<Act>])\r\n" \
 	L"  - change highlighting in the ACTIVE console only\r\n" \
 	L"    What==0: switch off/row/col/row+col/off/...\r\n" \
@@ -327,7 +335,7 @@ _DBGHLP(L"-ZoneId - Try to drop :Zone.Identifier without confirmation.\r\n") \
 	L"     Cmd==5: select and parse folder pathname, Text - default\r\n" \
 	L"     Cmd==6: select and parse cygwin file pathname, Text - default\r\n" \
 	L"     Cmd==7: select and parse cygwin folder pathname, Text - default\r\n" \
-	L"     Cmd==8: paste path from clipboard converted to CygWin style\r\n" \
+	L"     Cmd==8: paste path from clipboard converted to POSIX style\r\n" \
 	L"     Cmd==9: paste all lines space-separated\r\n" \
 	L"     Cmd==10: paste all lines space-separated, without confirmations\r\n" \
 	L"PasteExplorerPath (<DoCd>,<SetFocus>)\r\n" \
@@ -417,6 +425,7 @@ _DBGHLP(L"-ZoneId - Try to drop :Zone.Identifier without confirmation.\r\n") \
 	L"    Cmd=1, Horz=-1..1, Vert=-1..1: Move splitter between panes (aka resize panes)\r\n" \
 	L"    Cmd=2, Horz=-1..1, Vert=-1..1: Put cursor to the nearest pane\r\n" \
 	L"    Cmd=3, Maximize/restore active pane\r\n" \
+	L"    Cmd=4, Horz=-1..1, Vert=-1..1: Swap nearest panes\r\n" \
 	L"Status(0[,<Parm>])\r\n" \
 	L"  - Show/Hide status bar, Parm=1 - Show, Parm=2 - Hide\r\n" \
 	L"Status(1[,\"<Text>\"])\r\n" \

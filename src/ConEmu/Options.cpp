@@ -40,7 +40,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #ifdef _DEBUG
 #include <TlHelp32.h>
 #endif
-#include "../common/MFileLog.h"
+#include "../common/MFileLogEx.h"
 #include "../common/Monitors.h"
 #include "../common/StartupEnvDef.h"
 #include "../common/WRegistry.h"
@@ -387,7 +387,7 @@ void Settings::InitSettings()
 
 	nStartCreateDelay = RUNQUEUE_CREATE_LAG_DEF;
 	isAutoRegisterFonts = true;
-	nHostkeyNumberModifier = VK_LWIN; //TestHostkeyModifiers(nHostkeyNumberModifier);
+	nHostkeyNumberModifier = VK_LCONTROL; //TestHostkeyModifiers(nHostkeyNumberModifier);
 	nHostkeyArrowModifier = VK_LWIN; //TestHostkeyModifiers(nHostkeyArrowModifier);
 	isSingleInstance = false;
 	isShowHelpTooltips = true;
@@ -429,7 +429,6 @@ void Settings::InitSettings()
 	DefaultBufferHeight = 1000; AutoBufferHeight = true;
 	UseScrollLock = true;
 	isSaveCmdHistory = true;
-	nCmdOutputCP = 0;
 	ComSpec.AddConEmu2Path = CEAP_AddAll;
 	{
 		ComSpec.isAllowUncPaths = FALSE;
@@ -594,7 +593,9 @@ void Settings::InitSettings()
 	AppStd.isCTSEOL = 0;
 	AppStd.isCTSShiftArrowStart = true;
 	AppStd.isPasteAllLines = true;
+	AppStd.isPosixAllLines = pxm_Auto;
 	AppStd.isPasteFirstLine = true;
+	AppStd.isPosixFirstLine = pxm_Auto;
 
 	// 0 - off, 1 - force, 2 - try to detect "ReadConsole" (don't use 2 in bash)
 	AppStd.isCTSClickPromptPosition = 2; // Кликом мышки позиционировать курсор в Cmd Prompt (cmd.exe, Powershell.exe, ...) + vkCTSVkPromptClk
@@ -1255,7 +1256,9 @@ void Settings::LoadAppSettings(SettingsBase* reg, AppSettings* pApp/*, COLORREF*
 	reg->Load(L"ClipboardEOL", pApp->isCTSEOL); MinMax(pApp->isCTSEOL,2);
 	reg->Load(L"ClipboardArrowStart", pApp->isCTSShiftArrowStart);
 	reg->Load(L"ClipboardAllLines", pApp->isPasteAllLines);
+	reg->Load(L"ClipboardAllLinesPosix", pApp->isPosixAllLines);
 	reg->Load(L"ClipboardFirstLine", pApp->isPasteFirstLine);
+	reg->Load(L"ClipboardFirstLinePosix", pApp->isPosixFirstLine);
 	reg->Load(L"ClipboardClickPromptPosition", pApp->isCTSClickPromptPosition); MinMax(pApp->isCTSClickPromptPosition,2);
 	reg->Load(L"ClipboardDeleteLeftWord", pApp->isCTSDeleteLeftWord); MinMax(pApp->isCTSDeleteLeftWord,2);
 }
@@ -2631,7 +2634,6 @@ void Settings::LoadSettings(bool& rbNeedCreateVanilla, const SettingsStorage* ap
 		reg->Load(L"UseScrollLock", UseScrollLock);
 
 		//reg->Load(L"FarSyncSize", FarSyncSize);
-		reg->Load(L"CmdOutputCP", nCmdOutputCP);
 
 		BYTE nVal = ComSpec.csType;
 		reg->Load(L"ComSpec.Type", nVal);
@@ -2859,8 +2861,8 @@ void Settings::LoadSettings(bool& rbNeedCreateVanilla, const SettingsStorage* ap
 		reg->Load(L"TabLazy", isTabLazy);
 		reg->Load(L"TabFlashChanged", nTabFlashChanged);
 		reg->Load(L"TabRecent", isTabRecent);
-		reg->Load(L"TabDblClick", nTabBarDblClickAction); MinMax(nTabBarDblClickAction, 3);
-		reg->Load(L"TabBtnDblClick", nTabBtnDblClickAction); MinMax(nTabBtnDblClickAction, 5);
+		reg->Load(L"TabDblClick", nTabBarDblClickAction); MinMax(nTabBarDblClickAction, TabBarDblClick::Last-1);
+		reg->Load(L"TabBtnDblClick", nTabBtnDblClickAction); MinMax(nTabBtnDblClickAction, TabBtnDblClick::Last-1);
 		reg->Load(L"TabsOnTaskBar", m_isTabsOnTaskBar);
 		reg->Load(L"TaskBarOverlay", isTaskbarOverlay);
 		reg->Load(L"TaskbarProgress", isTaskbarProgress);
@@ -3404,7 +3406,9 @@ void Settings::SaveAppSettings(SettingsBase* reg, AppSettings* pApp/*, COLORREF*
 	reg->Save(L"ClipboardEOL", pApp->isCTSEOL);
 	reg->Save(L"ClipboardArrowStart", pApp->isCTSShiftArrowStart);
 	reg->Save(L"ClipboardAllLines", pApp->isPasteAllLines);
+	reg->Save(L"ClipboardAllLinesPosix", pApp->isPosixAllLines);
 	reg->Save(L"ClipboardFirstLine", pApp->isPasteFirstLine);
+	reg->Save(L"ClipboardFirstLinePosix", pApp->isPosixFirstLine);
 	reg->Save(L"ClipboardClickPromptPosition", pApp->isCTSClickPromptPosition);
 	reg->Save(L"ClipboardDeleteLeftWord", pApp->isCTSDeleteLeftWord);
 }
@@ -3627,7 +3631,6 @@ BOOL Settings::SaveSettings(BOOL abSilent /*= FALSE*/, const SettingsStorage* ap
 		reg->Save(L"DefaultBufferHeight", DefaultBufferHeight);
 		reg->Save(L"AutoBufferHeight", AutoBufferHeight);
 		reg->Save(L"UseScrollLock", UseScrollLock);
-		reg->Save(L"CmdOutputCP", nCmdOutputCP);
 		reg->Save(L"ComSpec.Type", (BYTE)ComSpec.csType);
 		reg->Save(L"ComSpec.Bits", (BYTE)ComSpec.csBits);
 		reg->Save(L"ComSpec.UpdateEnv", _bool(ComSpec.isUpdateEnv));
@@ -5006,7 +5009,7 @@ bool Settings::isCloseOnLastTabClose()
 		return false;
 	if (gpConEmu->WindowStartNoClose)
 		return false;
-	if (gpConEmu->opt.Detached)
+	if (gpConEmu->opt.NoAutoClose)
 		return false;
 	return true;
 }

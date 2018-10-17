@@ -49,6 +49,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 	#define WINE_PRINT_PROC_INFO
 //	#define USE_PIPE_DEBUG_BOXES
 //	#define SHOW_SETCONTITLE_MSGBOX
+	#define SHOW_LOADCFGFILE_MSGBOX
 
 //	#define DEBUG_ISSUE_623
 
@@ -70,7 +71,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 //#define SHOW_INJECT_MSGBOX
 
-#include "ConEmuC.h"
+#include "ConEmuSrv.h"
 #include "../common/CmdLine.h"
 #include "../common/ConsoleAnnotation.h"
 #include "../common/ConsoleMixAttr.h"
@@ -91,6 +92,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "../common/RConStartArgs.h"
 #include "../common/SetEnvVar.h"
 #include "../common/StartupEnvEx.h"
+#include "../common/wcwidth.h"
 #include "../common/WCodePage.h"
 #include "../common/WConsole.h"
 #include "../common/WFiles.h"
@@ -226,7 +228,6 @@ BOOL  gbDumpServerInitStatus = FALSE;
 BOOL  gbNoCreateProcess = FALSE;
 BOOL  gbDontInjectConEmuHk = FALSE;
 BOOL  gbAsyncRun = FALSE;
-int   gnCmdUnicodeMode = 0;
 UINT  gnPTYmode = 0; // 1 enable PTY, 2 - disable PTY (work as plain console), 0 - don't change
 BOOL  gbRootIsCmdExe = TRUE;
 BOOL  gbAttachFromFar = FALSE;
@@ -262,7 +263,7 @@ SHORT gnBufferWidth = 0; // Определяется в MyGetConsoleScreenBuffer
 wchar_t* gpszPrevConTitle = NULL;
 #endif
 
-MFileLog* gpLogSize = NULL;
+MFileLogEx* gpLogSize = NULL;
 
 
 BOOL gbInRecreateRoot = FALSE;
@@ -1350,7 +1351,7 @@ int __stdcall ConsoleMain3(int anWorkMode/*0-Server&ComSpec,1-AltServer,2-Reserv
 	// We need to set `0` before CreateProcess, otherwise we may get timeout,
 	// due to misc antivirus software, BEFORE CreateProcess finishes
 	if (!(gbAttachMode & am_Modes))
-		gpSrv->nProcessStartTick = 0;
+		gpSrv->processes->nProcessStartTick = 0;
 
 	if (gbNoCreateProcess)
 	{
@@ -1653,8 +1654,8 @@ int __stdcall ConsoleMain3(int anWorkMode/*0-Server&ComSpec,1-AltServer,2-Reserv
 	}
 	else
 	{
-		if (!gpSrv->nProcessStartTick) // Уже мог быть проинициализирован из cmd_CmdStartStop
-			gpSrv->nProcessStartTick = GetTickCount();
+		if (!gpSrv->processes->nProcessStartTick) // Уже мог быть проинициализирован из cmd_CmdStartStop
+			gpSrv->processes->nProcessStartTick = GetTickCount();
 	}
 
 	if (pi.dwProcessId)
@@ -1682,12 +1683,12 @@ int __stdcall ConsoleMain3(int anWorkMode/*0-Server&ComSpec,1-AltServer,2-Reserv
 		gpSrv->dwRootThread  = pi.dwThreadId;
 		gpSrv->dwRootStartTime = GetTickCount();
 		// Скорее всего процесс в консольном списке уже будет
-		CheckProcessCount(TRUE);
+		gpSrv->processes->CheckProcessCount(TRUE);
 
 		#ifdef _DEBUG
-		if (gpSrv->nProcessCount && !gpSrv->DbgInfo.bDebuggerActive)
+		if (gpSrv->processes->nProcessCount && !gpSrv->DbgInfo.bDebuggerActive)
 		{
-			_ASSERTE(gpSrv->pnProcesses[gpSrv->nProcessCount-1]!=0);
+			_ASSERTE(gpSrv->processes->pnProcesses[gpSrv->processes->nProcessCount-1]!=0);
 		}
 		#endif
 
@@ -1722,8 +1723,8 @@ int __stdcall ConsoleMain3(int anWorkMode/*0-Server&ComSpec,1-AltServer,2-Reserv
 
 		if (nWait != WAIT_OBJECT_0)  // Если таймаут
 		{
-			iRc = gpSrv->nProcessCount
-				+ (((gpSrv->nProcessCount==1) && gbUseDosBox && (WaitForSingleObject(ghDosBoxProcess,0)==WAIT_TIMEOUT)) ? 1 : 0);
+			iRc = gpSrv->processes->nProcessCount
+				+ (((gpSrv->processes->nProcessCount==1) && gbUseDosBox && (WaitForSingleObject(ghDosBoxProcess,0)==WAIT_TIMEOUT)) ? 1 : 0);
 
 			// И процессов в консоли все еще нет
 			if (iRc == 1 && !gpSrv->DbgInfo.bDebuggerActive)
@@ -1756,7 +1757,7 @@ int __stdcall ConsoleMain3(int anWorkMode/*0-Server&ComSpec,1-AltServer,2-Reserv
 							}
 						}
 
-						if ((nWait != WAIT_OBJECT_0) && (gpSrv->nProcessCount > 1))
+						if ((nWait != WAIT_OBJECT_0) && (gpSrv->processes->nProcessCount > 1))
 						{
 							gbTerminateOnCtrlBreak = FALSE;
 							gbCtrlBreakStopWaitingShown = FALSE; // сбросим, чтобы ассерты не лезли
@@ -1946,10 +1947,10 @@ wrap:
 		}
 
 		// Post information to GUI
-		if (gnMainServerPID)
+		if (gnMainServerPID && !gpSrv->bWasDetached)
 		{
 			CESERVER_REQ* pIn = ExecuteNewCmd(CECMD_GETROOTINFO, sizeof(CESERVER_REQ_HDR)+sizeof(CESERVER_ROOT_INFO));
-			if (pIn && GetRootInfo(pIn))
+			if (pIn && gpSrv->processes->GetRootInfo(pIn))
 			{
 				CESERVER_REQ *pSrvOut = ExecuteGuiCmd(ghConWnd, pIn, ghConWnd, TRUE/*async*/);
 				ExecuteFreeResult(pSrvOut);
@@ -2000,7 +2001,7 @@ wrap:
 				{
 					if ((nProcesses[i] != gpSrv->dwRootProcess)
 						#ifndef WIN64
-						&& (nProcesses[i] != gpSrv->nNtvdmPID)
+						&& (nProcesses[i] != gpSrv->processes->nNtvdmPID)
 						#endif
 						)
 					{
@@ -2080,7 +2081,7 @@ wrap:
 
 		// During the wait, new process may be started in our console
 		{
-			int nCount = gpSrv->nProcessCount;
+			int nCount = gpSrv->processes->nProcessCount;
 
 			if ((gpSrv->ConnectInfo.bConnected && (nCount > 1))
 				|| gpSrv->DbgInfo.bDebuggerActive)
@@ -2459,21 +2460,6 @@ void PrintExecuteError(LPCWSTR asCmd, DWORD dwErr, LPCWSTR asSpecialInfo/*=NULL*
 	_printf("\nCommand to be executed:\n");
 	_wprintf(asCmd ? asCmd : L"<null>");
 	_printf("\n");
-}
-
-void CheckUnicodeMode()
-{
-	if (gnCmdUnicodeMode) return;
-
-	wchar_t szValue[16] = {0};
-
-	if (GetEnvironmentVariable(L"ConEmuOutput", szValue, sizeof(szValue)/sizeof(szValue[0])))
-	{
-		if (lstrcmpi(szValue, L"UNICODE") == 0)
-			gnCmdUnicodeMode = 2;
-		else if (lstrcmpi(szValue, L"ANSI") == 0)
-			gnCmdUnicodeMode = 1;
-	}
 }
 
 int CheckAttachProcess()
@@ -3005,6 +2991,23 @@ int ParseCommandLine(LPCWSTR asCmdLine)
 
 	BOOL lbAttachGuiApp = FALSE;
 
+	struct {
+		CEStr szConEmuAddArgs;
+		void Append(LPCWSTR asSwitch, LPCWSTR asValue)
+		{
+			lstrmerge(&szConEmuAddArgs.ms_Val, asSwitch);
+			if (asValue && *asValue)
+			{
+				bool needQuot = IsQuotationNeeded(asValue);
+				lstrmerge(&szConEmuAddArgs.ms_Val,
+					needQuot ? L" \"" : L" ",
+					asValue,
+					needQuot ? L"\"" : NULL);
+			}
+			SetEnvironmentVariable(ENV_CONEMU_EXEARGS_W, szConEmuAddArgs);
+		}
+	} AddArgs;
+
 	while ((iRc = NextArg(&lsCmdLine, szArg, &pszArgStarts)) == 0)
 	{
 		xf_check();
@@ -3501,7 +3504,7 @@ int ParseCommandLine(LPCWSTR asCmdLine)
 			}
 			TODO("/BX для ширины буфера?");
 		}
-		else if (wcsncmp(szArg, L"/F", 2)==0)
+		else if (wcsncmp(szArg, L"/F", 2)==0 && szArg[2] && szArg[3] == L'=')
 		{
 			wchar_t* pszEnd = NULL;
 
@@ -3805,14 +3808,6 @@ int ParseCommandLine(LPCWSTR asCmdLine)
 		{
 			lbNeedCdToProfileDir = true;
 		}
-		else if (wcscmp(szArg, L"/A")==0 || wcscmp(szArg, L"/a")==0)
-		{
-			gnCmdUnicodeMode = 1;
-		}
-		else if (wcscmp(szArg, L"/U")==0 || wcscmp(szArg, L"/u")==0)
-		{
-			gnCmdUnicodeMode = 2;
-		}
 		else if (lstrcmpi(szArg, L"/CONFIG")==0)
 		{
 			if ((iRc = NextArg(&lsCmdLine, szArg)) != 0)
@@ -3823,6 +3818,21 @@ int ParseCommandLine(LPCWSTR asCmdLine)
 			}
 			// Reuse config if starting "ConEmu.exe" from console server!
 			SetEnvironmentVariable(ENV_CONEMU_CONFIG_W, szArg);
+			AddArgs.Append(L"-config", szArg);
+		}
+		else if (lstrcmpi(szArg, L"/LoadCfgFile")==0)
+		{
+			// Reuse specified xml file if starting "ConEmu.exe" from console server!
+			#ifdef SHOW_LOADCFGFILE_MSGBOX
+			MessageBox(NULL, szArg, L"/LoadCfgFile", MB_SYSTEMMODAL);
+			#endif
+			if ((iRc = NextArg(&lsCmdLine, szArg)) != 0)
+			{
+				_ASSERTE(FALSE && "Xml file name was not specified!");
+				_wprintf(L"Xml file name was not specified!\r\n");
+				break;
+			}
+			AddArgs.Append(L"-LoadCfgFile", szArg);
 		}
 		else if (lstrcmpi(szArg, L"/ASYNC") == 0 || lstrcmpi(szArg, L"/FORK") == 0)
 		{
@@ -4323,14 +4333,9 @@ int ParseCommandLine(LPCWSTR asCmdLine)
 	// ====
 	if (gbRunViaCmdExe)
 	{
-		CheckUnicodeMode();
-
-		// -- для унификации - окавычиваем всегда
+		// -- always quotate
 		gpszRunCmd[0] = L'"';
 		_wcscpy_c(gpszRunCmd+1, nCchLen-1, gszComSpec);
-
-		if (gnCmdUnicodeMode)
-			_wcscat_c(gpszRunCmd, nCchLen, (gnCmdUnicodeMode == 2) ? L" /U" : L" /A");
 
 		_wcscat_c(gpszRunCmd, nCchLen, gpSrv->bK ? L"\" /K " : L"\" /C ");
 
@@ -4516,7 +4521,7 @@ int ExitWaitForKey(DWORD vkKeys, LPCWSTR asConfirm, BOOL abNewLine, BOOL abDontS
 		{
 			if (gnRunMode == RM_SERVER)
 			{
-				int nCount = gpSrv->nProcessCount;
+				int nCount = gpSrv->processes->nProcessCount;
 
 				if (nCount > 1)
 				{
@@ -4633,7 +4638,7 @@ bool isConEmuTerminated()
 	//TODO: Same as in ConEmu, it must check server presence via pipe
 	// For now, don't annoy user with RealConsole if all processes were finished
 	if (gbInExitWaitForKey // We are waiting for Enter or Esc
-		&& (gpSrv->nProcessCount <= 1) // No active processes are found in console (except our SrvPID)
+		&& (gpSrv->processes->nProcessCount <= 1) // No active processes are found in console (except our SrvPID)
 		)
 	{
 		// Let RealConsole remain invisible, ConEmu will deal the situation
@@ -5268,7 +5273,7 @@ void CreateLogSizeFile(int nLevel, const CESERVER_CONSOLE_MAPPING_HDR* pConsoleI
 		}
 	}
 
-	gpLogSize = new MFileLog(L"ConEmu-srv", pszDir, GetCurrentProcessId());
+	gpLogSize = new MFileLogEx(L"ConEmu-srv", pszDir, GetCurrentProcessId());
 
 	if (!gpLogSize)
 		return;
@@ -5599,49 +5604,106 @@ static void UndoConsoleWindowZoom()
 	UNREFERENCED_PARAMETER(lbRc);
 }
 
+bool static NeedLegacyCursorCorrection()
+{
+	static bool bNeedCorrection = false, bChecked = false;
+
+	if (!bChecked)
+	{
+		if (IsWin10() && (GetSystemMetrics(SM_DBCSENABLED) == 0) && !IsWin10LegacyConsole())
+		{
+			OSVERSIONINFOEXW osvi = { sizeof(osvi), 10, 0, 15063 };
+			DWORDLONG const dwlConditionMask = VerSetConditionMask(VerSetConditionMask(VerSetConditionMask(0, VER_MAJORVERSION, VER_EQUAL), VER_MINORVERSION, VER_EQUAL), VER_BUILDNUMBER, VER_EQUAL);
+			BOOL ibIsWin = VerifyVersionInfoW(&osvi, VER_MAJORVERSION | VER_MINORVERSION | VER_BUILDNUMBER, dwlConditionMask);
+			if (ibIsWin)
+			{
+				bNeedCorrection = true;
+			}
+		}
+	}
+
+	return bNeedCorrection;
+}
+
 // TODO: Optimize - combine ReadConsoleData/ReadConsoleInfo
 void static CorrectDBCSCursorPosition(HANDLE ahConOut, CONSOLE_SCREEN_BUFFER_INFO& csbi)
 {
-	if (!gbIsDBCS || csbi.dwSize.X <= 0 || csbi.dwCursorPosition.X <= 0)
+	if (csbi.dwSize.X <= 0 || csbi.dwCursorPosition.X <= 0)
 		return;
 
 	// Issue 577: Chinese display error on Chinese
-	// -- GetConsoleScreenBufferInfo возвращает координаты курсора в DBCS, а нам нужен wchar_t !!!
-	if (IsConsoleDoubleCellCP())
+	// -- GetConsoleScreenBufferInfo returns DBCS cursor coordinates, but we require wchar_t !!!
+	if (!IsConsoleDoubleCellCP()
+	// gh-1057: In NON DBCS systems there are cursor problems too (Win10 stable build 15063)
+		&& !NeedLegacyCursorCorrection())
+		return;
+
+	// The correction process
 	{
-		WORD Attrs[200];
-		LONG cchMax = countof(Attrs);
-		WORD* pAttrs = (csbi.dwCursorPosition.X <= cchMax) ? Attrs : (WORD*)calloc(csbi.dwCursorPosition.X, sizeof(*pAttrs));
-		if (pAttrs)
+		CHAR Chars[200];
+		LONG cchMax = countof(Chars);
+		LPSTR pChars = (csbi.dwCursorPosition.X <= cchMax) ? Chars : (LPSTR)calloc(csbi.dwCursorPosition.X, sizeof(*pChars));
+		if (pChars)
 			cchMax = csbi.dwCursorPosition.X;
 		else
-			pAttrs = Attrs; // memory allocation fail? try part of line?
+			pChars = Chars; // memory allocation fail? try part of line?
 		COORD crRead = {0, csbi.dwCursorPosition.Y};
 		//120830 - DBCS uses 2 cells per hieroglyph
 		DWORD nRead = 0;
 		// TODO: Optimize
-		if (ReadConsoleOutputAttribute(ahConOut, pAttrs, cchMax, crRead, &nRead) && nRead)
+		BOOL bRead = NeedLegacyCursorCorrection() ? FALSE : ReadConsoleOutputCharacterA(ahConOut, pChars, cchMax, crRead, &nRead);
+		// ReadConsoleOutputCharacterA may return "???" instead of DBCS codes in Non-DBCS systems
+		if (bRead && (nRead == cchMax))
 		{
 			_ASSERTE(nRead==cchMax);
 			int nXShift = 0;
-			LPWORD p = pAttrs, pEnd = pAttrs+nRead;
+			LPSTR p = pChars, pEnd = pChars+nRead;
 			while (p < pEnd)
 			{
-				if ((*p) & COMMON_LVB_LEADING_BYTE)
+				if (IsDBCSLeadByte(*p))
 				{
 					nXShift++;
 					p++;
-					_ASSERTE((p < pEnd) && ((*p) & COMMON_LVB_TRAILING_BYTE));
+					_ASSERTE(p < pEnd);
 				}
 				p++;
 			}
 			_ASSERTE(nXShift <= csbi.dwCursorPosition.X);
 			csbi.dwCursorPosition.X = max(0,(csbi.dwCursorPosition.X - nXShift));
 		}
-		if (pAttrs && (pAttrs != Attrs))
+		else if (IsWin10() && (NeedLegacyCursorCorrection() || (GetConsoleOutputCP() == CP_UTF8)))
 		{
-			free(pAttrs);
+			// Temporary workaround for conhost bug!
+			CHAR_INFO CharsEx[200];
+			CHAR_INFO* pCharsEx = (cchMax <= countof(CharsEx)) ? CharsEx
+				: (CHAR_INFO*)calloc(cchMax, sizeof(*pCharsEx));
+			if (pCharsEx)
+			{
+				COORD bufSize = {cchMax, 1}; COORD bufCoord = {0,0};
+				SMALL_RECT rgn = MakeSmallRect(0, csbi.dwCursorPosition.Y, cchMax-1, csbi.dwCursorPosition.Y);
+				bRead = ReadConsoleOutputW(ahConOut, pCharsEx, bufSize, bufCoord, &rgn);
+				if (bRead)
+				{
+					int nXShift = 0;
+					CHAR_INFO *p = pCharsEx, *pEnd = pCharsEx+cchMax;
+					while ((p + nXShift) < pEnd)
+					{
+						if (get_wcwidth(p->Char.UnicodeChar) == 2)
+						{
+							nXShift++;
+							_ASSERTE(p < pEnd);
+						}
+						p++;
+					}
+					_ASSERTE(nXShift <= csbi.dwCursorPosition.X);
+					csbi.dwCursorPosition.X = max(0,(csbi.dwCursorPosition.X - nXShift));
+				}
+				if (pCharsEx != CharsEx)
+					free(pCharsEx);
+			}
 		}
+		if (pChars != Chars)
+			free(pChars);
 	}
 }
 
@@ -5810,7 +5872,7 @@ BOOL MyGetConsoleScreenBufferInfo(HANDLE ahConOut, PCONSOLE_SCREEN_BUFFER_INFO a
 
 	// Issue 577: Chinese display error on Chinese
 	// -- GetConsoleScreenBufferInfo возвращает координаты курсора в DBCS, а нам нужен wchar_t !!!
-	if (gbIsDBCS && csbi.dwSize.X && csbi.dwCursorPosition.X)
+	if (csbi.dwSize.X && csbi.dwCursorPosition.X)
 	{
 		CorrectDBCSCursorPosition(ahConOut, csbi);
 	}
@@ -6715,7 +6777,7 @@ int GetProcessCount(DWORD *rpdwPID, UINT nMaxCount)
 	if (!rpdwPID || (nMaxCount < 3))
 	{
 		_ASSERTE(rpdwPID && (nMaxCount >= 3));
-		return gpSrv->nProcessCount;
+		return gpSrv->processes->nProcessCount;
 	}
 
 
@@ -6743,7 +6805,7 @@ int GetProcessCount(DWORD *rpdwPID, UINT nMaxCount)
 		}
 		#endif
 
-		if (!gpSrv->nConhostPID)
+		if (!gpSrv->processes->nConhostPID)
 		{
 			// Найти порожденный conhost.exe
 			//TODO: Reuse MToolHelp.h
@@ -6759,7 +6821,7 @@ int GetProcessCount(DWORD *rpdwPID, UINT nMaxCount)
 						if ((PI.th32ParentProcessID == nSrvPID)
 							&& (lstrcmpi(PI.szExeFile, L"conhost.exe") == 0))
 						{
-							gpSrv->nConhostPID = PI.th32ProcessID;
+							gpSrv->processes->nConhostPID = PI.th32ProcessID;
 							break;
 						}
 					} while (Process32Next(h, &PI));
@@ -6768,26 +6830,26 @@ int GetProcessCount(DWORD *rpdwPID, UINT nMaxCount)
 				CloseHandle(h);
 			}
 
-			if (!gpSrv->nConhostPID)
-				gpSrv->nConhostPID = (UINT)-1;
+			if (!gpSrv->processes->nConhostPID)
+				gpSrv->processes->nConhostPID = (UINT)-1;
 		}
 
-		if (gpSrv->nConhostPID && (gpSrv->nConhostPID != (UINT)-1))
+		if (gpSrv->processes->nConhostPID && (gpSrv->processes->nConhostPID != (UINT)-1))
 		{
-			rpdwPID[nRetCount++] = gpSrv->nConhostPID;
+			rpdwPID[nRetCount++] = gpSrv->processes->nConhostPID;
 		}
 	}
 
 
 	MSectionLock CS;
 	UINT nCurCount = 0;
-	if (CS.Lock(gpSrv->csProc, TRUE/*abExclusive*/, 200))
+	if (CS.Lock(gpSrv->processes->csProc, TRUE/*abExclusive*/, 200))
 	{
-		nCurCount = gpSrv->nProcessCount;
+		nCurCount = gpSrv->processes->nProcessCount;
 
 		for (INT_PTR i1 = (nCurCount-1); (i1 >= 0) && (nRetCount < nMaxCount); i1--)
 		{
-			DWORD PID = gpSrv->pnProcesses[i1];
+			DWORD PID = gpSrv->processes->pnProcesses[i1];
 			if (PID && PID != gnSelfPID)
 			{
 				rpdwPID[nRetCount++] = PID;
@@ -6806,13 +6868,13 @@ int GetProcessCount(DWORD *rpdwPID, UINT nMaxCount)
 	//	rpdwPID[0] = gnSelfPID;
 
 	//	for(int i1=0, i2=(nMaxCount-1); i1<(int)nSize && i2>0; i1++, i2--)
-	//		rpdwPID[i2] = gpSrv->pnProcesses[i1]; //-V108
+	//		rpdwPID[i2] = gpSrv->processes->pnProcesses[i1]; //-V108
 
 	//	nSize = nMaxCount;
 	//}
 	//else
 	//{
-	//	memmove(rpdwPID, gpSrv->pnProcesses, sizeof(DWORD)*nSize);
+	//	memmove(rpdwPID, gpSrv->processes->pnProcesses, sizeof(DWORD)*nSize);
 
 	//	for (UINT i=nSize; i<nMaxCount; i++)
 	//		rpdwPID[i] = 0; //-V108

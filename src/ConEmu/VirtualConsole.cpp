@@ -296,6 +296,11 @@ CVirtualConsole::CVirtualConsole(CConEmuMain* pOwner, int index)
 	_ASSERTE(mh_WndDC == NULL);
 }
 
+CConEmuMain* CVirtualConsole::Owner()
+{
+	return this ? mp_ConEmu : NULL;
+}
+
 int CVirtualConsole::Index()
 {
 	return mn_Index;
@@ -339,7 +344,7 @@ bool CVirtualConsole::SetFlags(VConFlags Set, VConFlags Mask, int index)
 	return bChanged;
 }
 
-bool CVirtualConsole::Constructor(RConStartArgs *args)
+bool CVirtualConsole::Constructor(RConStartArgsEx *args)
 {
 	#ifdef __GNUC__
 	MModule gdi32(GetModuleHandle(L"gdi32.dll"));
@@ -599,13 +604,17 @@ bool CVirtualConsole::isGroup()
 	return CVConGroup::isGroup(this);
 }
 
-bool CVirtualConsole::isGroupedInput()
+EnumVConFlags CVirtualConsole::isGroupedInput()
 {
 	if (!this)
-		return false;
-	if (!(mn_Flags & vf_Grouped))
-		return false;
-	return true;
+		return evf_None;
+	if (mp_ConEmu->isInputGrouped())
+		return evf_All;
+	if ((mn_Flags & vf_GroupSplit))
+		return evf_Visible;
+	if ((mn_Flags & vf_GroupSet))
+		return evf_GroupSet;
+	return evf_None;
 }
 
 void CVirtualConsole::PointersFree()
@@ -3621,7 +3630,7 @@ void CVirtualConsole::UpdateCursor(bool& lRes)
 		Cursor.nLastBlink = GetTickCount();
 	}
 
-	// Из активной консоли - дернем курсоры остальных видимых сплитов
+	// From the active console - trigger cursor redraw in other VISIBLE panes
 	if (bConActive && isGroupedInput())
 	{
 		CVConGroup::EnumVCon(evf_Visible, UpdateCursorGroup, (LPARAM)(CVirtualConsole*)this);
@@ -4359,6 +4368,12 @@ LONG CVirtualConsole::GetTextHeight()
 {
 	_ASSERTE(this && m_Sizes.TextHeight);
 	return (LONG)m_Sizes.TextHeight;
+}
+
+SIZE CVirtualConsole::GetCellSize()
+{
+	SIZE sz = {m_Sizes.nFontWidth, m_Sizes.nFontHeight};
+	return sz;
 }
 
 RECT CVirtualConsole::GetRect()

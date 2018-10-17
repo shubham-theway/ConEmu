@@ -252,7 +252,7 @@ int ConEmuHotKeyList::AllocateHotkeys()
 	Add(vkMultiNewPopup2, chk_User,  NULL,    L"Multi.NewConsolePopup2",CConEmuCtrl::key_MultiNewPopupMenu2)
 		;
 	Add(vkMultiNewAttach, chk_User,  NULL,    L"Multi.NewAttach",       CConEmuCtrl::key_MultiNewAttach, true/*OnKeyUp*/)
-		->SetHotKey('G',VK_LWIN);
+		->SetHotKey('G',VK_LWIN,VK_SHIFT);
 	/*
 			Splitters
 	*/
@@ -282,10 +282,20 @@ int ConEmuHotKeyList::AllocateHotkeys()
 		->SetHotKey(VK_LEFT,VK_APPS);
 	Add(vkSplitFocusRight,chk_User,  NULL,    L"Multi.SplitFocusR",     CConEmuCtrl::key_GuiMacro, false, L"Split(2,1,0)")
 		->SetHotKey(VK_RIGHT,VK_APPS);
+	Add(vkSplitSwap,      chk_User,  NULL,    L"Multi.SplitSwap",       CConEmuCtrl::key_GuiMacro, false, L"Split(4)")
+		->SetHotKey('X',VK_APPS,VK_MENU);
+	Add(vkSplitSwapUp,    chk_User,  NULL,    L"Multi.SplitSwapU",      CConEmuCtrl::key_GuiMacro, false, L"Split(4,0,-1)")
+		->SetHotKey(VK_UP,VK_APPS,VK_MENU);
+	Add(vkSplitSwapDown,  chk_User,  NULL,    L"Multi.SplitSwapD",      CConEmuCtrl::key_GuiMacro, false, L"Split(4,0,1)")
+		->SetHotKey(VK_DOWN,VK_APPS,VK_MENU);
+	Add(vkSplitSwapLeft,  chk_User,  NULL,    L"Multi.SplitSwapL",      CConEmuCtrl::key_GuiMacro, false, L"Split(4,-1,0)")
+		->SetHotKey(VK_LEFT,VK_APPS,VK_MENU);
+	Add(vkSplitSwapRight, chk_User,  NULL,    L"Multi.SplitSwapR",      CConEmuCtrl::key_GuiMacro, false, L"Split(4,1,0)")
+		->SetHotKey(VK_RIGHT,VK_APPS,VK_MENU);
 	Add(vkMultiNext,      chk_User,  NULL,    L"Multi.Next",            CConEmuCtrl::key_MultiNext)
-		->SetHotKey('Q',VK_LWIN);
-	Add(vkMultiNextShift, chk_User,  NULL,    L"Multi.NextShift",       CConEmuCtrl::key_MultiNextShift)
 		->SetHotKey('Q',VK_LWIN,VK_SHIFT);
+	Add(vkMultiNextShift, chk_User,  NULL,    L"Multi.NextShift",       CConEmuCtrl::key_MultiPrev)
+		;
 	Add(vkMultiRecreate,  chk_User,  NULL,    L"Multi.Recreate",        CConEmuCtrl::key_MultiRecreate)
 		->SetHotKey(192/*VK_тильда*/,VK_LWIN);
 	Add(vkMultiAltCon,    chk_User,  NULL,    L"Multi.AltCon",          CConEmuCtrl::key_AlternativeBuffer)
@@ -294,8 +304,12 @@ int ConEmuHotKeyList::AllocateHotkeys()
 		->SetHotKey(VK_PAUSE);
 	Add(vkMultiBuffer,    chk_User,  NULL,    L"Multi.Scroll",          CConEmuCtrl::key_MultiBuffer)
 		;
-	Add(vkMultiGroup,     chk_User,  NULL,    L"Multi.GroupInput",      CConEmuCtrl::key_GuiMacro, false, L"GroupInput")
+	Add(vkMultiGroup,     chk_User,  NULL,    L"Multi.GroupInput",      CConEmuCtrl::key_GuiMacro, false, L"GroupInput(0)")
 		->SetHotKey('G', VK_APPS);
+	Add(vkMultiGroupAll,  chk_User,  NULL,    L"Multi.GroupInputAll",   CConEmuCtrl::key_GuiMacro, false, L"GroupInput(3)")
+		->SetHotKey('G', VK_APPS, VK_SHIFT);
+	Add(vkMultiGroupKey,  chk_User,  NULL,    L"Multi.GroupInputKey",   CConEmuCtrl::key_GuiMacro, false, L"GroupInput(6)")
+		->SetHotKey('G', VK_APPS, VK_MENU);
 	Add(vkConDetach,      chk_User,  NULL,    L"Multi.Detach",          CConEmuCtrl::key_GuiMacro, false, L"Detach")
 		;
 	Add(vkConUnfasten,    chk_User,  NULL,    L"Multi.Unfasten",        CConEmuCtrl::key_GuiMacro, false, L"Unfasten")

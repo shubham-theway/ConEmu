@@ -53,7 +53,8 @@ const VConFlags
 	vf_Active    = 0x0001,
 	vf_Visible   = 0x0002,
 	vf_Maximized = 0x0008,
-	vf_Grouped   = 0x0010,
+	vf_GroupSplit= 0x0010, // simultaneous input for active split group
+	vf_GroupSet  = 0x0020, // simultaneous input for selected consoles
 	vf_None      = 0
 ;
 
@@ -97,21 +98,22 @@ class CVirtualConsole :
 
 	protected:
 		CVirtualConsole(CConEmuMain* pOwner, int index);
-		bool Constructor(RConStartArgs *args);
+		bool Constructor(RConStartArgsEx *args);
 	public:
 		void InitGhost();
 	protected:
 		virtual ~CVirtualConsole();
 		friend class CVConRelease;
 	public:
-		CRealConsole *RCon();
+		CConEmuMain* Owner();
+		CRealConsole* RCon();
 		HWND GuiWnd();
 		void setFocus();
 		HWND GhostWnd();
 		bool isActive(bool abAllowGroup);
 		bool isVisible();
 		bool isGroup();
-		bool isGroupedInput();
+		EnumVConFlags isGroupedInput();
 	public:
 		int Index();
 		LPCWSTR IndexStr();
@@ -273,6 +275,7 @@ class CVirtualConsole :
 		LONG GetVConHeight();
 		LONG GetTextWidth();
 		LONG GetTextHeight();
+		SIZE GetCellSize();
 		RECT GetRect();
 		RECT GetDcClientRect();
 		void OnFontChanged();

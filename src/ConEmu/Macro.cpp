@@ -1539,13 +1539,16 @@ LPWSTR ConEmuMacro::Close(GuiMacro* p, CRealConsole* apRCon, bool abFromPlugin)
 		break;
 	case 2: // close ConEmu window (2), no confirm (2,1)
 	{
-		BYTE bPrevConfirm = gpSet->nCloseConfirmFlags;
-		if (nFlags & 1)
-			gpSet->nCloseConfirmFlags = Settings::cc_None;
-		bool bClosed = gpConEmu->OnScClose();
-		if (bClosed)
+		bool bClose = true, bMsgConfirmed = false;
+		if (!(nFlags & 1) && gpSet->nCloseConfirmFlags && !CVConGroup::OnCloseQuery(&bMsgConfirmed))
+			bClose = false;
+		else
+			gpConEmu->SilentMacroClose = true;
+		if (bClose)
+		{
+			gpConEmu->PostScClose();
 			pszResult = lstrdup(L"OK");
-		gpSet->nCloseConfirmFlags = bPrevConfirm;
+		}
 		break;
 	}
 	case 3: // close active tab (3)
@@ -1627,9 +1630,9 @@ LPWSTR ConEmuMacro::Detach(GuiMacro* p, CRealConsole* apRCon, bool abFromPlugin)
 	LPWSTR pszResult = NULL;
 	if (apRCon)
 	{
-		int iDontConfirm = 0;
-		p->GetIntArg(0, iDontConfirm);
-		apRCon->Detach(false, false, (iDontConfirm == 1));
+		int iOptions = 0;
+		p->GetIntArg(0, iOptions);
+		apRCon->DetachRCon((iOptions & 2) != 0, false, (iOptions & 1) == 1);
 		pszResult = lstrdup(L"OK");
 	}
 	return pszResult ? pszResult : lstrdup(L"Failed");
@@ -2116,7 +2119,7 @@ LPWSTR ConEmuMacro::Copy(GuiMacro* p, CRealConsole* apRCon, bool abFromPlugin)
 			// Cygwin style path?
 			if (wcschr(pszTemp, L'/'))
 			{
-				if (szDstBuf.Attach(MakeWinPath(pszTemp)))
+				if (MakeWinPath(pszTemp, apRCon ? apRCon->GetMntPrefix() : NULL, szDstBuf))
 					pszDstFile = szDstBuf.ms_Val;
 			}
 		}
@@ -2156,6 +2159,7 @@ LPWSTR ConEmuMacro::Paste(GuiMacro* p, CRealConsole* apRCon, bool abFromPlugin)
 	{
 		CEPasteMode PasteMode = (nCommand & 1) ? pm_FirstLine : pm_Standard;
 		bool bNoConfirm = (nCommand & 2) != 0;
+		PosixPasteMode ppm = pxm_Intact;
 
 		wchar_t* pszChooseBuf = NULL;
 
@@ -2183,7 +2187,7 @@ LPWSTR ConEmuMacro::Paste(GuiMacro* p, CRealConsole* apRCon, bool abFromPlugin)
 		if ((nCommand >= 4) && (nCommand <= 7))
 		{
 			CEStr szDir;
-			LPCWSTR pszDefPath = apRCon->GetConsoleCurDir(szDir);
+			LPCWSTR pszDefPath = apRCon->GetConsoleCurDir(szDir, true);
 
 			if ((nCommand == 4) || (nCommand == 6))
 				pszChooseBuf = SelectFile(L"Choose file pathname for paste", pszText, pszDefPath, ghWnd, NULL, sff_AutoQuote|((nCommand == 6)?sff_Cygwin:sff_Default));
@@ -2200,6 +2204,7 @@ LPWSTR ConEmuMacro::Paste(GuiMacro* p, CRealConsole* apRCon, bool abFromPlugin)
 		else if (nCommand == 8)
 		{
 			PasteMode = pm_FirstLine;
+			ppm = pxm_Convert;
 			bNoConfirm = true;
 		}
 		else if (nCommand == 9 || nCommand == 10)
@@ -2242,9 +2247,24 @@ LPWSTR ConEmuMacro::GroupInput(GuiMacro* p, CRealConsole* apRCon, bool abFromPlu
 	int nCommand = 0;
 	p->GetIntArg(0, nCommand);
 
-	if (apRCon && (nCommand >= 0 && nCommand <= 2))
+	// Active splits (visible panes)
+	if (nCommand >= 0 && nCommand <= 2)
 	{
+		// 0 - toggle, 1 - group, 2 - ungroup
 		CVConGroup::GroupInput(apRCon->VCon(), (GroupInputCmd)nCommand);
+		return lstrdup(L"OK");
+	}
+	// All VCons (active/inactive/invisible)
+	else if (nCommand >= 3 && nCommand <= 5)
+	{
+		// 3 - toggle, 4 - group, 5 - ungroup
+		CVConGroup::ResetGroupInput(apRCon->Owner(), (GroupInputCmd)(nCommand-3));
+		return lstrdup(L"OK");
+	}
+	// Toggle group mode on active console
+	else if (nCommand == 6)
+	{
+		CVConGroup::GroupSelectedInput(apRCon->VCon());
 		return lstrdup(L"OK");
 	}
 
@@ -3151,7 +3171,7 @@ LPWSTR ConEmuMacro::Shell(GuiMacro* p, CRealConsole* apRCon, bool abFromPlugin)
 		bool bDontDuplicate = false;
 		if (bNewConsoleVerb)
 		{
-			RConStartArgs args; args.pszSpecialCmd = lstrmerge(L"\"-", pszOper, L"\"");
+			RConStartArgsEx args; args.pszSpecialCmd = lstrmerge(L"\"-", pszOper, L"\"");
 			args.ProcessNewConArg();
 			// new_console:I
 			bForceDuplicate = (args.ForceInherit == crb_On) && (apRCon != NULL);
@@ -3228,7 +3248,7 @@ LPWSTR ConEmuMacro::Shell(GuiMacro* p, CRealConsole* apRCon, bool abFromPlugin)
 			if (bNewOper || (pszParm && wcsstr(pszParm, L"-new_console")))
 			{
 				size_t nAllLen;
-				RConStartArgs *pArgs = new RConStartArgs;
+				RConStartArgsEx *pArgs = new RConStartArgsEx;
 
 				// It's allowed now to append user arguments to named task contents
 				{
@@ -3282,8 +3302,8 @@ LPWSTR ConEmuMacro::Shell(GuiMacro* p, CRealConsole* apRCon, bool abFromPlugin)
 				if (pszDir && (lstrcmpi(pszDir, L"%CD%") == 0))
 				{
 					if (apRCon)
-						apRCon->GetConsoleCurDir(szRConCD);
-					else
+						apRCon->GetConsoleCurDir(szRConCD, true);
+					if (szRConCD.IsEmpty())
 						szRConCD.Set(gpConEmu->WorkDir());
 					pszDir = szRConCD.ms_Val;
 				}
@@ -3437,6 +3457,11 @@ LPWSTR ConEmuMacro::Split(GuiMacro* p, CRealConsole* apRCon, bool abFromPlugin)
 		{
 			// Maximize/Restore active pane
 			CVConGroup::PaneMaximizeRestore(apRCon->VCon());
+		}
+		else if (nCmd == 4)
+		{
+			// Exchange active with nearest pane using preferred direction defined by Horz and Vert parameters
+			pszResult = CVConGroup::ExchangePanes(apRCon->VCon(), nHorz, nVert) ? lstrdup(L"OK") : lstrdup(L"Failed");
 		}
 	}
 
@@ -3663,7 +3688,7 @@ LPWSTR ConEmuMacro::Task(GuiMacro* p, CRealConsole* apRCon, bool abFromPlugin)
 
 	if (pszName && *pszName)
 	{
-		RConStartArgs *pArgs = new RConStartArgs;
+		RConStartArgsEx *pArgs = new RConStartArgsEx;
 		pArgs->pszSpecialCmd = lstrdup(pszName);
 
 		LPWSTR pszDir = NULL;

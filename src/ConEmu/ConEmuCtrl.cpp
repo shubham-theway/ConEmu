@@ -369,11 +369,11 @@ bool CConEmuCtrl::ProcessHotKeyMsg(UINT messg, WPARAM wParam, LPARAM lParam, con
 }
 
 // Warning! UpdateControlKeyState() must be called already!
-ConEmuChord CConEmuCtrl::ChordFromVk(BYTE Vk)
+ConEmuChord CConEmuCtrl::ChordFromVk(DWORD Vk)
 {
 	_ASSERTE((Vk & 0xFF) == Vk);
 
-	ConEmuChord chord = {Vk};
+	ConEmuChord chord = {LOBYTE(Vk)};
 
 	if (bWin)
 		chord.Mod |= cvk_Win;
@@ -521,7 +521,7 @@ bool CConEmuCtrl::key_MultiNext(const ConEmuChord& VkState, bool TestOnly, const
 }
 
 // pRCon may be NULL
-bool CConEmuCtrl::key_MultiNextShift(const ConEmuChord& VkState, bool TestOnly, const ConEmuHotKey* hk, CRealConsole* pRCon)
+bool CConEmuCtrl::key_MultiPrev(const ConEmuChord& VkState, bool TestOnly, const ConEmuHotKey* hk, CRealConsole* pRCon)
 {
 	if (TestOnly)
 		return true;
@@ -588,7 +588,7 @@ bool CConEmuCtrl::key_MultiCmd(const ConEmuChord& VkState, bool TestOnly, const 
 	if (TestOnly)
 		return true;
 
-	RConStartArgs args;
+	RConStartArgsEx args;
 
 	// User choosed default task?
 	int nGroup = 0;
@@ -1339,7 +1339,7 @@ bool CConEmuCtrl::key_PasteTextAllApp(const ConEmuChord& VkState, bool TestOnly,
 		_ASSERTE(FALSE && "Unsupported PasteLinesMode");
 		pasteMode = pm_Standard;
 	}
-	pRCon->Paste(pasteMode);
+	pRCon->Paste(pasteMode, NULL, false/*default*/, pApp->PosixAllLines());
 	return true;
 }
 
@@ -1379,7 +1379,7 @@ bool CConEmuCtrl::key_PasteFirstLineAllApp(const ConEmuChord& VkState, bool Test
 		_ASSERTE(FALSE && "Unsupported PasteLinesMode");
 		pasteMode = pm_Standard;
 	}
-	pRCon->Paste(pasteMode);
+	pRCon->Paste(pasteMode, NULL, false/*default*/, pApp->PosixFirstLine());
 	return true;
 }
 
